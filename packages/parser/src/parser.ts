@@ -138,7 +138,7 @@ function toParseResult(document: LangiumDocument<Namespace>): ParseResult {
  */
 export function parseSysML(
   source: string,
-  uri = 'memory://model.sysml',
+  uri = 'memory:///model.sysml',
 ): ParseResult {
   const services = ensureServices();
   const doc = services.shared.workspace.LangiumDocumentFactory.fromString(
@@ -153,7 +153,7 @@ export function parseSysML(
  */
 export function parseKerML(
   source: string,
-  uri = 'memory://model.kerml',
+  uri = 'memory:///model.kerml',
 ): ParseResult {
   const services = ensureServices();
   const doc = services.shared.workspace.LangiumDocumentFactory.fromString(
