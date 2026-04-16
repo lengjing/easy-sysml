@@ -1,2 +1,4 @@
 node_modules/
-dist/packages/parser/tsconfig.tsbuildinfo
+dist/
+*.tsbuildinfo
+.turbo/
