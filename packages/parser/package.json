@@ -1,0 +1,27 @@
+{
+  "name": "@easy-sysml/parser",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@easy-sysml/protocol": "workspace:*",
+    "@easy-sysml/ast": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.0",
+    "vitest": "^2.1.9"
+  }
+}

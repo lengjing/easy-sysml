@@ -8,6 +8,35 @@ importers:
 
   .: {}
 
+  packages/ast:
+    dependencies:
+      '@easy-sysml/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: ~5.7.0
+        version: 5.7.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.19.17)
+
+  packages/parser:
+    dependencies:
+      '@easy-sysml/ast':
+        specifier: workspace:*
+        version: link:../ast
+      '@easy-sysml/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: ~5.7.0
+        version: 5.7.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.19.17)
+
   packages/protocol:
     devDependencies:
       typescript:
