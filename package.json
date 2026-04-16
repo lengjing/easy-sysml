@@ -1,0 +1,17 @@
+{
+  "name": "easy-sysml",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SysML v2 Language Tooling — parser, language server, and IDE support",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r run clean"
+  }
+}

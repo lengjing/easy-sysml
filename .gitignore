@@ -1,2 +1,8 @@
 node_modules/
 dist/
+out/
+*.tsbuildinfo
+.turbo/
+.vscode-test/
+*.vsix
+src/generated/
