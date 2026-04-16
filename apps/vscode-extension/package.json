@@ -1,0 +1,86 @@
+{
+  "name": "easy-sysml-vscode",
+  "displayName": "Easy SysML — SysML v2 Language Support",
+  "description": "Language support for SysML v2 with AI-assisted modeling",
+  "version": "0.1.0",
+  "publisher": "easy-sysml",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:sysml",
+    "onLanguage:kerml"
+  ],
+  "main": "./dist/extension.cjs",
+  "contributes": {
+    "languages": [
+      {
+        "id": "sysml",
+        "aliases": ["SysML v2", "sysml"],
+        "extensions": [".sysml"],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "kerml",
+        "aliases": ["KerML", "kerml"],
+        "extensions": [".kerml"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sysml",
+        "scopeName": "source.sysml",
+        "path": "./syntaxes/sysml.tmLanguage.json"
+      },
+      {
+        "language": "kerml",
+        "scopeName": "source.sysml",
+        "path": "./syntaxes/sysml.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "easySysml.restartServer",
+        "title": "Restart SysML Language Server",
+        "category": "SysML"
+      },
+      {
+        "command": "easySysml.openChat",
+        "title": "Open SysML Chat Panel",
+        "category": "SysML"
+      }
+    ],
+    "configuration": {
+      "title": "Easy SysML",
+      "properties": {
+        "easySysml.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the SysML language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.cjs --format=cjs --platform=node --external:vscode --sourcemap",
+    "watch": "npm run build -- --watch",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.25.4",
+    "typescript": "^5.8.3"
+  }
+}

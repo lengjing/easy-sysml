@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Easy SysML — Web Editor</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 16px; background: #1e1e1e; color: #ccc; }
+    h2 { margin-top: 0; }
+    #editor { background: #252525; }
+    textarea { background: #252525; color: #d4d4d4; border: none; outline: none; resize: none; }
+    input { background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; }
+    button { background: #0e639c; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #1177bb; }
+    #chat-messages { background: #252525; border-color: #444 !important; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./dist/app.js"></script>
+</body>
+</html>

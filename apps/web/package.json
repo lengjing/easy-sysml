@@ -1,0 +1,17 @@
+{
+  "name": "easy-sysml-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SysML v2 web editor — Monaco editor with LSP and chat-based SysML generation",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --outfile=dist/app.js --format=esm --platform=browser --sourcemap",
+    "watch": "npm run build -- --watch",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.4",
+    "typescript": "^5.8.3"
+  }
+}
