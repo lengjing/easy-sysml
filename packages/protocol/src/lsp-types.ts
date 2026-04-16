@@ -21,7 +21,7 @@ export interface Location {
 }
 
 /** Severity level for a diagnostic. */
-export const enum DiagnosticSeverity {
+export enum DiagnosticSeverity {
   Error = 1,
   Warning = 2,
   Information = 3,
@@ -71,7 +71,7 @@ export interface TextDocumentContentChangeEvent {
 // ---------------------------------------------------------------------------
 
 /** The kind of a completion item. */
-export const enum CompletionItemKind {
+export enum CompletionItemKind {
   Text = 1,
   Method = 2,
   Function = 3,
@@ -126,7 +126,7 @@ export interface Hover {
 // ---------------------------------------------------------------------------
 
 /** Symbol kinds used in document/workspace symbol responses. */
-export const enum SymbolKind {
+export enum SymbolKind {
   File = 1,
   Module = 2,
   Namespace = 3,

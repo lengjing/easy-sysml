@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 /** The role of a participant in a chat conversation. */
-export const enum ChatRole {
+export enum ChatRole {
   User = 'user',
   Assistant = 'assistant',
   System = 'system',

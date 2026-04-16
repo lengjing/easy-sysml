@@ -5,7 +5,7 @@
 import type { Range } from './lsp-types.js';
 
 /** Enumeration of all supported SysML v2 element kinds. */
-export const enum SysMLElementKind {
+export enum SysMLElementKind {
   Package = 'Package',
   PartDefinition = 'PartDefinition',
   PartUsage = 'PartUsage',
@@ -52,14 +52,14 @@ export const enum SysMLElementKind {
 }
 
 /** SysML v2 visibility qualifiers. */
-export const enum VisibilityKind {
+export enum VisibilityKind {
   Public = 'public',
   Private = 'private',
   Protected = 'protected',
 }
 
 /** Kinds of relationships between SysML elements. */
-export const enum RelationshipKind {
+export enum RelationshipKind {
   Specialization = 'Specialization',
   Redefinition = 'Redefinition',
   Subsetting = 'Subsetting',
