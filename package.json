@@ -1,0 +1,21 @@
+{
+  "name": "easy-sysml",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next-generation SysML v2 modeling platform",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r run clean",
+    "dev:web": "pnpm --filter @easy-sysml/web run dev",
+    "dev:extension": "pnpm --filter @easy-sysml/extension run watch"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "license": "LGPL-3.0-or-later"
+}
