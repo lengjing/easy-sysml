@@ -1,7 +1,7 @@
 {
   "name": "@easy-sysml/parser",
   "version": "0.1.0",
-  "description": "SysML v2 / KerML recursive descent parser for easy-sysml platform",
+  "description": "SysML v2 / KerML Langium-based parser for easy-sysml platform",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,18 +17,21 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc --build",
+    "langium:generate": "langium generate && node scripts/fix-generated.cjs",
+    "build": "npm run langium:generate && tsc --build",
     "test": "vitest run",
     "lint": "tsc --noEmit",
-    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+    "clean": "rm -rf dist tsconfig.tsbuildinfo src/generated"
   },
   "dependencies": {
     "@easy-sysml/ast": "workspace:*",
     "@easy-sysml/protocol": "workspace:*",
-    "@easy-sysml/utils": "workspace:*"
+    "@easy-sysml/utils": "workspace:*",
+    "langium": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",
+    "langium-cli": "^3.3.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
   }

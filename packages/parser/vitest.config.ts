@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     server: {
       deps: {
-        inline: ['@easy-sysml/protocol', '@easy-sysml/ast', '@easy-sysml/utils'],
+        inline: ['@easy-sysml/protocol', '@easy-sysml/ast', '@easy-sysml/utils', 'langium'],
       },
     },
   },

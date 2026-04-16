@@ -1,13 +1,20 @@
-// ---------------------------------------------------------------------------
-// @easy-sysml/parser – barrel export
-// ---------------------------------------------------------------------------
+// @easy-sysml/parser – barrel export (Langium-based)
 
-export { Lexer, TokenKind } from './lexer.js';
-export type { Token } from './lexer.js';
+// Re-export generated AST types
+export * from './generated/ast.js';
 
-export { Parser } from './parser.js';
-export type { ParseResult } from './parser.js';
+// Re-export Langium modules for LSP integration
+export {
+  SysMLGeneratedModule,
+  SysMLGeneratedSharedModule,
+  KerMLGeneratedModule,
+  SysMLLanguageMetaData,
+  KerMLLanguageMetaData,
+} from './generated/module.js';
 
-export { ParseError, ErrorCode, ErrorRecovery } from './parse-error.js';
+// Standalone parser API
+export { parseSysML, disposeParser } from './parser.js';
+export type { ParseResult, ParseErrorInfo } from './parser.js';
 
-export { IncrementalParser } from './incremental.js';
+// AST bridge
+export { bridgeAst } from './ast-bridge.js';
