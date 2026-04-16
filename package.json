@@ -1,0 +1,17 @@
+{
+  "name": "easy-sysml",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SysML v2 modeling platform built with Langium",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r run clean"
+  }
+}

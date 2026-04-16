@@ -1,0 +1,28 @@
+{
+  "name": "@easy-sysml/grammar",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "SysML v2 / KerML Langium grammar and generated parser",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "langium:generate": "langium generate && node scripts/fix-generated.cjs",
+    "build": "npm run langium:generate && tsc --build",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "langium": "~3.3.1"
+  },
+  "devDependencies": {
+    "langium-cli": "~3.5.0",
+    "typescript": "~5.7.0"
+  }
+}
