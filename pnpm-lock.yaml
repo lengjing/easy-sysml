@@ -43,11 +43,62 @@ importers:
         specifier: ~5.7.0
         version: 5.7.3
 
+  packages/semantic:
+    dependencies:
+      '@easy-sysml/ast':
+        specifier: workspace:*
+        version: link:../ast
+      '@easy-sysml/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: ~5.7.0
+        version: 5.7.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.19.17)
+
+  packages/stdlib:
+    dependencies:
+      '@easy-sysml/parser':
+        specifier: workspace:*
+        version: link:../parser
+      '@easy-sysml/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: ~5.7.0
+        version: 5.7.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.19.17)
+
   packages/utils:
     devDependencies:
       '@types/node':
         specifier: ^22.15.0
         version: 22.19.17
+      typescript:
+        specifier: ~5.7.0
+        version: 5.7.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.19.17)
+
+  packages/validation:
+    dependencies:
+      '@easy-sysml/ast':
+        specifier: workspace:*
+        version: link:../ast
+      '@easy-sysml/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@easy-sysml/semantic':
+        specifier: workspace:*
+        version: link:../semantic
+    devDependencies:
       typescript:
         specifier: ~5.7.0
         version: 5.7.3
