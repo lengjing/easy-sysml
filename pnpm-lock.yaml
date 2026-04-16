@@ -8,6 +8,31 @@ importers:
 
   .: {}
 
+  packages/language-server:
+    dependencies:
+      '@easy-sysml/parser':
+        specifier: workspace:*
+        version: link:../parser
+      langium:
+        specifier: ^4.2.2
+        version: 4.2.2
+      vscode-languageserver:
+        specifier: ^9.0.1
+        version: 9.0.1
+      vscode-languageserver-textdocument:
+        specifier: ^1.0.12
+        version: 1.0.12
+      vscode-uri:
+        specifier: ^3.1.0
+        version: 3.1.0
+    devDependencies:
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.1
+        version: 3.2.4
+
   packages/parser:
     dependencies:
       langium:
