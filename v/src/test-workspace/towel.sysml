@@ -1,1 +1,0 @@
-../../sysml_resources/towel.sysml

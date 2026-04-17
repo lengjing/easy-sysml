@@ -1,0 +1,35 @@
+{
+  "name": "@easy-sysml/language-server",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "LGPL-3.0-or-later",
+  "description": "SysML v2 Language Server Protocol implementation",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "sysml-language-server": "./bin/sysml-language-server.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@easy-sysml/parser": "workspace:*",
+    "@easy-sysml/stdlib": "workspace:*",
+    "langium": "~3.3.1",
+    "vscode-languageserver": "~9.0.1",
+    "vscode-languageserver-textdocument": "~1.0.12",
+    "vscode-uri": "~3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "~5.8.3"
+  }
+}

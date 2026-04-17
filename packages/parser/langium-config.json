@@ -1,0 +1,16 @@
+{
+  "projectName": "SysML",
+  "languages": [
+    {
+      "id": "kerml",
+      "grammar": "src/grammar/kerml.langium",
+      "fileExtensions": [".kerml"]
+    },
+    {
+      "id": "sysml",
+      "grammar": "src/grammar/sysml.langium",
+      "fileExtensions": [".sysml"]
+    }
+  ],
+  "out": "src/generated"
+}
