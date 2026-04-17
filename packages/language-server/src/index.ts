@@ -5,4 +5,5 @@
  */
 
 export { createSysMLServices, startServer } from './main.js';
+export { createSysMLBrowserServices } from './sysml-browser-module.js';
 export type { SysMLServices, KerMLServices } from './sysml-module.js';

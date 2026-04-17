@@ -2,14 +2,24 @@
  * SysML Monaco Editor Component
  *
  * A React wrapper around Monaco Editor configured for SysML/KerML editing.
- * Registers the SysML language on first mount and wires up language service
- * providers (diagnostics, hover, completion, go-to-definition).
+ * Connects to a Web Worker running the SysML language server via LSP.
+ * The monarch tokenizer provides syntax highlighting; hover, completion,
+ * go-to-definition, and diagnostics are powered by the real LSP.
  */
 import React, { useRef, useCallback, useEffect } from 'react';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import { registerSysMLLanguage, SYSML_LANGUAGE_ID } from './sysml-language';
-import { registerSysMLProviders, scheduleDiagnostics } from './sysml-language-service';
+import { SysMLLanguageClient } from './sysml-language-client';
+import type {
+  CompletionItem,
+  CompletionList,
+  DocumentSymbol,
+  SymbolInformation,
+  Location,
+  LocationLink,
+  MarkupContent,
+} from 'vscode-languageserver-protocol';
 
 export interface SysMLEditorProps {
   /** Current editor value. */
@@ -20,8 +30,209 @@ export interface SysMLEditorProps {
   className?: string;
 }
 
-/** Whether language providers have already been registered globally. */
+/** Document URI used for LSP communication. */
+const DOC_URI = 'inmemory:///model.sysml';
+
+/** Shared LSP client singleton. */
+let _client: SysMLLanguageClient | undefined;
+/** Whether Monaco providers have been registered. */
 let _providersRegistered = false;
+
+function getClient(): SysMLLanguageClient {
+  if (!_client) {
+    _client = new SysMLLanguageClient();
+  }
+  return _client;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Register Monaco providers backed by the LSP client                */
+/* ------------------------------------------------------------------ */
+
+function registerLSPProviders(monaco: typeof Monaco): void {
+  const client = getClient();
+
+  // Hover provider
+  monaco.languages.registerHoverProvider(SYSML_LANGUAGE_ID, {
+    async provideHover(model, position) {
+      const hover = await client.hover(
+        DOC_URI,
+        position.lineNumber - 1,
+        position.column - 1,
+      );
+      if (!hover) return null;
+
+      const contents: Monaco.IMarkdownString[] = [];
+      if (typeof hover.contents === 'string') {
+        contents.push({ value: hover.contents });
+      } else if (Array.isArray(hover.contents)) {
+        for (const c of hover.contents) {
+          if (typeof c === 'string') {
+            contents.push({ value: c });
+          } else if ('value' in c) {
+            contents.push({ value: c.value });
+          }
+        }
+      } else if ('kind' in hover.contents) {
+        contents.push({ value: (hover.contents as MarkupContent).value });
+      } else if ('value' in hover.contents) {
+        contents.push({ value: hover.contents.value });
+      }
+
+      return { contents };
+    },
+  });
+
+  // Completion provider
+  monaco.languages.registerCompletionItemProvider(SYSML_LANGUAGE_ID, {
+    triggerCharacters: ['.', ':', ' '],
+    async provideCompletionItems(model, position) {
+      const result = await client.completion(
+        DOC_URI,
+        position.lineNumber - 1,
+        position.column - 1,
+      );
+      if (!result) return { suggestions: [] };
+
+      const items: CompletionItem[] = Array.isArray(result)
+        ? result
+        : (result as CompletionList).items;
+
+      const word = model.getWordUntilPosition(position);
+      const range: Monaco.IRange = {
+        startLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: word.endColumn,
+      };
+
+      return {
+        suggestions: items.map((item) => ({
+          label: item.label,
+          kind: SysMLLanguageClient.toMonacoCompletionKind(
+            monaco,
+            item.kind,
+          ),
+          insertText: item.insertText ?? (typeof item.label === 'string' ? item.label : (item.label as { label: string }).label),
+          insertTextRules: item.insertTextFormat === 2
+            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+            : undefined,
+          detail: item.detail,
+          documentation: item.documentation
+            ? typeof item.documentation === 'string'
+              ? item.documentation
+              : { value: (item.documentation as MarkupContent).value }
+            : undefined,
+          range,
+        })),
+      };
+    },
+  });
+
+  // Definition provider
+  monaco.languages.registerDefinitionProvider(SYSML_LANGUAGE_ID, {
+    async provideDefinition(model, position) {
+      const result = await client.definition(
+        DOC_URI,
+        position.lineNumber - 1,
+        position.column - 1,
+      );
+      if (!result) return null;
+
+      const locations = Array.isArray(result) ? result : [result];
+      return locations.map((loc) => {
+        if ('targetUri' in loc) {
+          // LocationLink
+          const ll = loc as LocationLink;
+          return {
+            uri: monaco.Uri.parse(ll.targetUri),
+            range: {
+              startLineNumber: ll.targetRange.start.line + 1,
+              startColumn: ll.targetRange.start.character + 1,
+              endLineNumber: ll.targetRange.end.line + 1,
+              endColumn: ll.targetRange.end.character + 1,
+            },
+          };
+        }
+        // Location
+        const l = loc as Location;
+        return {
+          uri: monaco.Uri.parse(l.uri),
+          range: {
+            startLineNumber: l.range.start.line + 1,
+            startColumn: l.range.start.character + 1,
+            endLineNumber: l.range.end.line + 1,
+            endColumn: l.range.end.character + 1,
+          },
+        };
+      });
+    },
+  });
+
+  // Document symbol provider
+  monaco.languages.registerDocumentSymbolProvider(SYSML_LANGUAGE_ID, {
+    async provideDocumentSymbols(model) {
+      const result = await client.documentSymbols(DOC_URI);
+      if (!result) return [];
+
+      function mapSymbol(
+        sym: DocumentSymbol | SymbolInformation,
+      ): Monaco.languages.DocumentSymbol {
+        if ('range' in sym && 'selectionRange' in sym) {
+          // DocumentSymbol (hierarchical)
+          const ds = sym as DocumentSymbol;
+          return {
+            name: ds.name,
+            detail: ds.detail ?? '',
+            kind: SysMLLanguageClient.toMonacoSymbolKind(monaco, ds.kind),
+            range: {
+              startLineNumber: ds.range.start.line + 1,
+              startColumn: ds.range.start.character + 1,
+              endLineNumber: ds.range.end.line + 1,
+              endColumn: ds.range.end.character + 1,
+            },
+            selectionRange: {
+              startLineNumber: ds.selectionRange.start.line + 1,
+              startColumn: ds.selectionRange.start.character + 1,
+              endLineNumber: ds.selectionRange.end.line + 1,
+              endColumn: ds.selectionRange.end.character + 1,
+            },
+            tags: [],
+            children: ds.children?.map(mapSymbol) ?? [],
+          };
+        }
+        // SymbolInformation (flat)
+        const si = sym as SymbolInformation;
+        const r = si.location.range;
+        return {
+          name: si.name,
+          detail: '',
+          kind: SysMLLanguageClient.toMonacoSymbolKind(monaco, si.kind),
+          range: {
+            startLineNumber: r.start.line + 1,
+            startColumn: r.start.character + 1,
+            endLineNumber: r.end.line + 1,
+            endColumn: r.end.character + 1,
+          },
+          selectionRange: {
+            startLineNumber: r.start.line + 1,
+            startColumn: r.start.character + 1,
+            endLineNumber: r.end.line + 1,
+            endColumn: r.end.character + 1,
+          },
+          tags: [],
+          children: [],
+        };
+      }
+
+      return result.map(mapSymbol);
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Editor component                                                  */
+/* ------------------------------------------------------------------ */
 
 export const SysMLEditor: React.FC<SysMLEditorProps> = ({
   value,
@@ -30,44 +241,53 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
 }) => {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
+  const docOpenRef = useRef(false);
 
   /** Register the SysML language before Monaco mounts. */
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
     registerSysMLLanguage(monaco);
     if (!_providersRegistered) {
-      registerSysMLProviders(monaco);
+      registerLSPProviders(monaco);
       _providersRegistered = true;
     }
     monacoRef.current = monaco;
   }, []);
 
-  /** Store the editor instance and run initial diagnostics. */
-  const handleMount: OnMount = useCallback((editor, monaco) => {
-    editorRef.current = editor;
-    monacoRef.current = monaco;
+  /** Store the editor instance, connect to LSP, open the document. */
+  const handleMount: OnMount = useCallback(
+    (editor, monaco) => {
+      editorRef.current = editor;
+      monacoRef.current = monaco;
 
-    // Run diagnostics on the initial content
-    const model = editor.getModel();
-    if (model) {
-      scheduleDiagnostics(monaco, model, 100);
-    }
+      const client = getClient();
+      client.setMonaco(monaco);
 
-    editor.focus();
-  }, []);
+      // Register for diagnostics
+      client.onDiagnostics((uri, markers) => {
+        const model = editor.getModel();
+        if (model && uri === DOC_URI) {
+          monaco.editor.setModelMarkers(model, 'sysml-lsp', markers);
+        }
+      });
 
-  /** Propagate content changes and schedule diagnostics. */
+      // Open the document
+      client.didOpen(DOC_URI, value).then(() => {
+        docOpenRef.current = true;
+      });
+
+      editor.focus();
+    },
+    [value],
+  );
+
+  /** Propagate content changes and notify LSP. */
   const handleChange = useCallback(
     (val: string | undefined) => {
-      onChange(val ?? '');
+      const text = val ?? '';
+      onChange(text);
 
-      // Schedule diagnostics when content changes
-      const editor = editorRef.current;
-      const monaco = monacoRef.current;
-      if (editor && monaco) {
-        const model = editor.getModel();
-        if (model) {
-          scheduleDiagnostics(monaco, model);
-        }
+      if (docOpenRef.current) {
+        getClient().didChange(DOC_URI, text);
       }
     },
     [onChange],
@@ -82,8 +302,21 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
         monaco.editor.setTheme(dark ? 'vs-dark' : 'vs');
       }
     });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
     return () => observer.disconnect();
+  }, []);
+
+  /** Cleanup on unmount. */
+  useEffect(() => {
+    return () => {
+      if (docOpenRef.current) {
+        getClient().didClose(DOC_URI);
+        docOpenRef.current = false;
+      }
+    };
   }, []);
 
   const isDark = document.documentElement.classList.contains('dark');
@@ -100,7 +333,8 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
         options={{
           minimap: { enabled: true },
           fontSize: 12,
-          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
+          fontFamily:
+            "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
           lineNumbers: 'on',
           scrollBeyondLastLine: false,
           automaticLayout: true,

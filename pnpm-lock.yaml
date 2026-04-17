@@ -23,6 +23,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.5)
+      '@easy-sysml/language-server':
+        specifier: workspace:*
+        version: link:../../packages/language-server
       '@easy-sysml/parser':
         specifier: workspace:*
         version: link:../../packages/parser
@@ -86,6 +89,9 @@ importers:
       vite:
         specifier: ^6.2.0
         version: 6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)
+      vscode-languageserver-protocol:
+        specifier: ^3.17.5
+        version: 3.17.5
     devDependencies:
       '@testing-library/jest-dom':
         specifier: ^6.9.1
