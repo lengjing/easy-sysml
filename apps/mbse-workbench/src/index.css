@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  :root {
+    --bg-main: #ffffff;
+    --bg-sidebar: #f8fafc;
+    --bg-activitybar: #f1f5f9;
+    --bg-header: #ffffff;
+    --bg-canvas: #f1f5f9;
+    --bg-input: #ffffff;
+    --border-color: #e2e8f0;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    --accent-color: #3b82f6;
+    --accent-hover: #2563eb;
+    --scrollbar-thumb: #cbd5e1;
+  }
+
+  .dark {
+    --bg-main: #0f1115;
+    --bg-sidebar: #16191e;
+    --bg-activitybar: #0b0d11;
+    --bg-header: #1a1d23;
+    --bg-canvas: #0b0d11;
+    --bg-input: #0f172a;
+    --border-color: #1e293b;
+    --text-main: #e2e8f0;
+    --text-muted: #94a3b8;
+    --accent-color: #3b82f6;
+    --accent-hover: #60a5fa;
+    --scrollbar-thumb: #1e293b;
+  }
+
+  body {
+    @apply bg-[var(--bg-main)] text-[var(--text-main)] antialiased transition-colors duration-200;
+  }
+}
+
+/* React Flow Customizations */
+.react-flow__node {
+  @apply bg-[var(--bg-input)] text-[var(--text-main)] rounded-md px-4 py-2 text-xs font-medium transition-all
+  !p-0 !border-none !bg-transparent !shadow-none;
+}
+
+.react-flow__node.selected {
+  @apply bg-[var(--bg-sidebar)];
+}
+
+.react-flow__handle {
+  @apply w-2 h-2 bg-blue-500 border-2 border-[var(--bg-main)];
+}
+
+.react-flow__edge-path {
+  @apply stroke-slate-400 stroke-2;
+}
+
+.dark .react-flow__edge-path {
+  @apply stroke-slate-600;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  @apply stroke-blue-500;
+}
+
+.react-flow__controls-button {
+  @apply bg-[var(--bg-sidebar)] border-[var(--border-color)] fill-[var(--text-muted)] hover:bg-[var(--border-color)] transition-colors;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-[var(--scrollbar-thumb)] rounded-full hover:opacity-80 transition-all;
+}
