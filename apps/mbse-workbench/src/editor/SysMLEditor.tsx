@@ -107,24 +107,30 @@ function registerLSPProviders(monaco: typeof Monaco): void {
       };
 
       return {
-        suggestions: items.map((item) => ({
-          label: item.label,
-          kind: SysMLLanguageClient.toMonacoCompletionKind(
-            monaco,
-            item.kind,
-          ),
-          insertText: item.insertText ?? (typeof item.label === 'string' ? item.label : (item.label as { label: string }).label),
-          insertTextRules: item.insertTextFormat === 2
-            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-            : undefined,
-          detail: item.detail,
-          documentation: item.documentation
-            ? typeof item.documentation === 'string'
-              ? item.documentation
-              : { value: (item.documentation as MarkupContent).value }
-            : undefined,
-          range,
-        })),
+        suggestions: items.map((item) => {
+          const labelText = typeof item.label === 'string'
+            ? item.label
+            : (item.label as { label: string }).label;
+
+          return {
+            label: item.label,
+            kind: SysMLLanguageClient.toMonacoCompletionKind(
+              monaco,
+              item.kind,
+            ),
+            insertText: item.insertText ?? labelText,
+            insertTextRules: item.insertTextFormat === 2
+              ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+              : undefined,
+            detail: item.detail,
+            documentation: item.documentation
+              ? typeof item.documentation === 'string'
+                ? item.documentation
+                : { value: (item.documentation as MarkupContent).value }
+              : undefined,
+            range,
+          };
+        }),
       };
     },
   });
