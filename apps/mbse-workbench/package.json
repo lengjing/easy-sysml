@@ -28,7 +28,7 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "langium": "~3.3.1",
+    "langium": "~4.2.2",
     "lucide-react": "^0.546.0",
     "monaco-editor": "^0.55.1",
     "motion": "^12.23.24",

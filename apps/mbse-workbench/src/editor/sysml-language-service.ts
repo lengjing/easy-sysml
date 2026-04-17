@@ -496,7 +496,7 @@ export function registerSysMLProviders(monacoInstance: typeof Monaco): void {
 
   // Completion provider
   monacoInstance.languages.registerCompletionItemProvider(SYSML_LANGUAGE_ID, {
-    triggerCharacters: ['.', ':', ' '],
+    triggerCharacters: ['.', ':'],
     provideCompletionItems(model, position) {
       const source = model.getValue();
       const items = getCompletions(source, position.lineNumber, position.column);

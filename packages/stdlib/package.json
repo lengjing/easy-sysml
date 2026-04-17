@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@easy-sysml/parser": "workspace:*",
-    "langium": "~3.3.1"
+    "langium": "~4.2.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

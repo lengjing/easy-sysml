@@ -13,11 +13,11 @@ import type {
   AstNode,
   AstNodeDescription,
   LangiumDocument,
-  PrecomputedScopes,
   LangiumCoreServices,
   ScopeComputation,
 } from 'langium';
 import { MultiMap } from 'langium';
+import type { LocalSymbols } from 'langium';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -28,7 +28,7 @@ export class SysMLScopeComputation implements ScopeComputation {
     this.services = services;
   }
 
-  async computeExports(document: LangiumDocument): Promise<AstNodeDescription[]> {
+  async collectExportedSymbols(document: LangiumDocument): Promise<AstNodeDescription[]> {
     const exports: AstNodeDescription[] = [];
     const root = document.parseResult?.value;
     if (!root) return exports;
@@ -36,7 +36,7 @@ export class SysMLScopeComputation implements ScopeComputation {
     return exports;
   }
 
-  async computeLocalScopes(document: LangiumDocument): Promise<PrecomputedScopes> {
+  async collectLocalSymbols(document: LangiumDocument): Promise<LocalSymbols> {
     const scopes = new MultiMap<AstNode, AstNodeDescription>();
     const root = document.parseResult?.value;
     if (!root) return scopes;
