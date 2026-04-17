@@ -94,7 +94,7 @@ export const sysmlMonarchTokens: monaco.languages.IMonarchLanguage = {
     '=', '>', '<', '>=', '<=', '==', '!=',
     '+', '-', '*', '/', '%', '**',
     '->', ':>', '::>', ':>>', '~',
-    '..', '..',
+    '..', ':',
   ],
 
   symbols: /[=><!~?:&|+\-*/^%]+/,
