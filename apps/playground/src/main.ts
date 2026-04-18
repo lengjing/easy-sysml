@@ -143,7 +143,7 @@ async function main(): Promise<void> {
       }
       const isMain = targetModel.uri.toString() === mainModelUri.toString();
       backBtn.style.display = isMain ? 'none' : 'inline-block';
-      fileIndicator.textContent = isMain ? '' : `— ${targetModel.uri.path.split('/').pop()}`;
+      fileIndicator.textContent = isMain ? '' : `— ${targetModel.uri.path.split('/').pop() ?? targetModel.uri.path}`;
       if (!isMain) {
         editor.updateOptions({ readOnly: true });
       } else {
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
         const targetModel = monaco.editor.getModel(targetUri);
         if (targetModel && targetModel !== source.getModel()) {
           showModel(targetModel, input.options?.selection);
-          log.info(`Opened: ${targetUri.path.split('/').pop()}`);
+          log.info(`Opened: ${targetUri.path.split('/').pop() ?? targetUri.path}`);
           return source;
         }
         return origOpenCodeEditor?.(input, source);
