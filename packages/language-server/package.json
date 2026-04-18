@@ -10,6 +10,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/sysml-browser-module.d.ts",
+      "import": "./dist/sysml-browser-module.js"
+    },
+    "./main-browser": {
+      "types": "./dist/main-browser.d.ts",
+      "import": "./dist/main-browser.js"
     }
   },
   "bin": {
@@ -23,7 +31,7 @@
   "dependencies": {
     "@easy-sysml/parser": "workspace:*",
     "@easy-sysml/stdlib": "workspace:*",
-    "langium": "~3.3.1",
+    "langium": "~4.2.2",
     "vscode-languageserver": "~9.0.1",
     "vscode-languageserver-textdocument": "~1.0.12",
     "vscode-uri": "~3.1.0"

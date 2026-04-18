@@ -5,7 +5,7 @@
  * during workspace initialization.
  */
 
-import { DefaultWorkspaceManager, type LangiumDocument, UriUtils, type URI } from 'langium';
+import { DefaultWorkspaceManager, type LangiumDocument, type URI } from 'langium';
 import type { FileSystemNode } from 'langium';
 import type { LangiumSharedServices } from 'langium/lsp';
 import type { WorkspaceFolder, Connection } from 'vscode-languageserver';
@@ -43,36 +43,30 @@ export class SysMLWorkspaceManager extends DefaultWorkspaceManager {
   }
 
   protected override async traverseFolder(
-    workspaceFolder: WorkspaceFolder,
     folderPath: URI,
-    fileExtensions: string[],
-    collector: (document: LangiumDocument) => void,
+    uris: URI[],
   ): Promise<void> {
     const content = await this.fileSystemProvider.readDirectory(folderPath);
     await Promise.all(
       content.map(async (entry) => {
-        if (this.includeEntry(workspaceFolder, entry, fileExtensions)) {
+        if (this.shouldIncludeEntry(entry)) {
           if (entry.isDirectory) {
-            await this.traverseFolder(workspaceFolder, entry.uri, fileExtensions, collector);
+            await this.traverseFolder(entry.uri, uris);
           } else if (entry.isFile) {
-            const document = await this.langiumDocuments.getOrCreateDocument(entry.uri);
-            collector(document);
+            uris.push(entry.uri);
           }
         }
       }),
     );
   }
 
-  protected override includeEntry(
-    workspaceFolder: WorkspaceFolder,
-    entry: FileSystemNode,
-    fileExtensions: string[],
-  ): boolean {
-    const name = UriUtils.basename(entry.uri);
+  override shouldIncludeEntry(entry: FileSystemNode): boolean {
+    const uriStr = entry.uri.toString();
+    const name = uriStr.substring(uriStr.lastIndexOf('/') + 1);
     if (name.startsWith('.')) return false;
     if (entry.isDirectory) {
       return !['node_modules', 'out', 'dist', 'stdlib'].includes(name);
     }
-    return super.includeEntry(workspaceFolder, entry, fileExtensions);
+    return super.shouldIncludeEntry(entry);
   }
 }

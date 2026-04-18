@@ -26,10 +26,8 @@ export class SysMLHoverProvider extends AstNodeHoverProvider {
     }
   }
 
-  protected override getAstNodeHoverContent(node: AstNode): MaybePromise<Hover | undefined> {
-    const md = this.getMarkdown(node);
-    if (!md) return undefined;
-    return { contents: { kind: 'markdown', value: md } };
+  protected override getAstNodeHoverContent(node: AstNode): MaybePromise<string | undefined> {
+    return this.getMarkdown(node);
   }
 
   private getFallbackHover(document: any, params: HoverParams): Hover | undefined {
