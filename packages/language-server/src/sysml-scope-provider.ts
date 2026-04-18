@@ -24,8 +24,6 @@ import {
   type Stream,
 } from 'langium';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 export class SysMLScopeProvider extends DefaultScopeProvider {
   constructor(services: LangiumCoreServices) {
     super(services);
@@ -33,10 +31,12 @@ export class SysMLScopeProvider extends DefaultScopeProvider {
 
   override getScope(context: ReferenceInfo): Scope {
     const scopes: Stream<AstNodeDescription>[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const doc = (context.container as any).$document ?? findDocument(context.container);
     const localSymbols = doc?.localSymbols;
 
     if (localSymbols) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let currentNode: any = context.container;
       do {
         if (localSymbols.has(currentNode)) {
@@ -66,6 +66,7 @@ export class SysMLScopeProvider extends DefaultScopeProvider {
 }
 
 /** Walk up to find the document root */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function findDocument(node: any): any {
   let current = node;
   while (current?.$container) {

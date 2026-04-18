@@ -105,18 +105,14 @@ export async function loadStdlibBrowser(
       }
 
       try {
-        // Use inmemory URI with stdlib path prefix
-        const ext = filename.endsWith('.kerml') ? 'kerml' : 'sysml';
         const uri = URI.parse(`inmemory:///stdlib/${filename}`);
-        // Re-create URI with correct extension for language detection
-        const uriWithExt = URI.parse(`inmemory:///stdlib/${filename.replace(/\.\w+$/, '.' + ext)}`);
 
-        if (langiumDocuments.hasDocument(uriWithExt)) {
+        if (langiumDocuments.hasDocument(uri)) {
           loaded++;
           continue;
         }
 
-        const document = documentFactory.fromString(content, uriWithExt);
+        const document = documentFactory.fromString(content, uri);
         langiumDocuments.addDocument(document);
         allDocuments.push(document);
         loaded++;
