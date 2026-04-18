@@ -130,6 +130,31 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(jsdom@29.0.2)(lightningcss@1.32.0)(tsx@4.21.0)
 
+  apps/playground:
+    dependencies:
+      '@easy-sysml/language-server':
+        specifier: workspace:*
+        version: link:../../packages/language-server
+      langium:
+        specifier: ~4.2.2
+        version: 4.2.2
+      monaco-editor:
+        specifier: ^0.52.2
+        version: 0.52.2
+      vscode-languageserver-protocol:
+        specifier: ^3.17.5
+        version: 3.17.5
+    devDependencies:
+      '@types/node':
+        specifier: ^22.14.0
+        version: 22.19.17
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vite:
+        specifier: ^6.2.0
+        version: 6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)
+
   apps/vscode-extension:
     dependencies:
       vscode-languageclient:
@@ -2304,6 +2329,9 @@ packages:
   minimatch@5.1.9:
     resolution: {integrity: sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==}
     engines: {node: '>=10'}
+
+  monaco-editor@0.52.2:
+    resolution: {integrity: sha512-GEQWEZmfkOGLdd3XK8ryrfWz3AIP8YymVXiPHEdewrUq7mh0qrKrfHLNCXcbB6sTnMLnOZ3ztSiKcciFUkIJwQ==}
 
   monaco-editor@0.55.1:
     resolution: {integrity: sha512-jz4x+TJNFHwHtwuV9vA9rMujcZRb0CEilTEwG2rRSpe/A7Jdkuj8xPKttCgOh+v/lkHy7HsZ64oj+q3xoAFl9A==}
@@ -4852,6 +4880,8 @@ snapshots:
   minimatch@5.1.9:
     dependencies:
       brace-expansion: 2.1.0
+
+  monaco-editor@0.52.2: {}
 
   monaco-editor@0.55.1:
     dependencies:

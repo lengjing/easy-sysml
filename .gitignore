@@ -5,3 +5,4 @@ out/
 .DS_Store
 v/
 packages/parser/src/generated/
+apps/playground/src/generated/

@@ -124,25 +124,35 @@ export class SysMLScopeComputation implements ScopeComputation {
 
   private traverseChildren(node: AstNode, callback: (child: AstNode) => void): void {
     const n = node as any;
+    // Deduplicate: ownedRelatedElement and ownedMemberElement may reference
+    // the same AstNode, causing exponential blowup without a guard.
+    const seen = new Set<unknown>();
+    const emit = (child: unknown) => {
+      if (child && typeof child === 'object' && '$type' in (child as any) && !seen.has(child)) {
+        seen.add(child);
+        callback(child as AstNode);
+      }
+    };
 
     if (Array.isArray(n.ownedRelationship)) {
       for (const rel of n.ownedRelationship) {
         if (Array.isArray(rel?.ownedRelatedElement)) {
-          for (const elem of rel.ownedRelatedElement) callback(elem);
-        } else if (rel?.ownedRelatedElement && typeof rel.ownedRelatedElement === 'object') {
-          callback(rel.ownedRelatedElement);
+          for (const elem of rel.ownedRelatedElement) emit(elem);
+        } else if (rel?.ownedRelatedElement) {
+          emit(rel.ownedRelatedElement);
         }
-        if (rel?.memberElement && typeof rel.memberElement === 'object') {
-          callback(rel.memberElement);
-        }
-        if (rel?.ownedMemberElement && typeof rel.ownedMemberElement === 'object') {
-          callback(rel.ownedMemberElement);
+        // NOTE: memberElement is a cross-reference (Reference<Element>).
+        // Accessing it during scope computation can trigger lazy resolution,
+        // which re-enters scope computation → infinite recursion.
+        // Only traverse owned containment properties.
+        if (rel?.ownedMemberElement) {
+          emit(rel.ownedMemberElement);
         }
       }
     }
 
     if (Array.isArray(n.ownedMember)) {
-      for (const member of n.ownedMember) callback(member);
+      for (const member of n.ownedMember) emit(member);
     }
   }
 
