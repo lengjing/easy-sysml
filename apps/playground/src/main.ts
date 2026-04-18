@@ -439,6 +439,9 @@ async function main(): Promise<void> {
 
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
+      if (changeTimer !== undefined) {
+        clearTimeout(changeTimer);
+      }
       client.didClose(DOC_URI);
       client.dispose();
     });
