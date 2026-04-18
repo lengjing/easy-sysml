@@ -4,10 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "generate:stdlib": "node scripts/bundle-stdlib.cjs",
+    "predev": "node scripts/bundle-stdlib.cjs",
     "dev": "vite --port=3000",
+    "prebuild": "node scripts/bundle-stdlib.cjs",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist src/generated",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
