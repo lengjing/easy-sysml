@@ -13,9 +13,13 @@ function appendLog(level: 'info' | 'warn' | 'error' | 'debug', ...args: unknown[
   logPanel.scrollTop = logPanel.scrollHeight;
 }
 
+function makeLogger(level: 'info' | 'warn' | 'error' | 'debug') {
+  return (...args: unknown[]) => { console[level](...args); appendLog(level, ...args); };
+}
+
 export const log = {
-  info: (...args: unknown[]) => { console.info(...args); appendLog('info', ...args); },
-  warn: (...args: unknown[]) => { console.warn(...args); appendLog('warn', ...args); },
-  error: (...args: unknown[]) => { console.error(...args); appendLog('error', ...args); },
-  debug: (...args: unknown[]) => { console.debug(...args); appendLog('debug', ...args); },
+  info: makeLogger('info'),
+  warn: makeLogger('warn'),
+  error: makeLogger('error'),
+  debug: makeLogger('debug'),
 };
