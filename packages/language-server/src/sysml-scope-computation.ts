@@ -32,7 +32,7 @@ export class SysMLScopeComputation implements ScopeComputation {
     const exports: AstNodeDescription[] = [];
     const root = document.parseResult?.value;
     if (!root) return exports;
-    this.collectExports(root, exports, document);
+    this.collectExports(root, exports, document, []);
     return exports;
   }
 
@@ -48,10 +48,18 @@ export class SysMLScopeComputation implements ScopeComputation {
     node: AstNode,
     exports: AstNodeDescription[],
     document: LangiumDocument,
+    qualifiedPrefix: string[],
   ): void {
     const name = this.getName(node);
     if (name) {
+      // Export with simple name
       exports.push(this.createDescription(node, name, document));
+
+      // Export with qualified name (e.g., "Base::DataValue") for cross-reference resolution
+      if (qualifiedPrefix.length > 0) {
+        const qualifiedName = [...qualifiedPrefix, name].join('::');
+        exports.push(this.createDescription(node, qualifiedName, document));
+      }
 
       const container = (node as any).$container as AstNode | undefined;
       if (container && this.isMembership(container)) {
@@ -64,6 +72,12 @@ export class SysMLScopeComputation implements ScopeComputation {
           ...this.createDescription(node, '~' + name, document),
           type: 'ConjugatedPortDefinition',
         });
+        if (qualifiedPrefix.length > 0) {
+          exports.push({
+            ...this.createDescription(node, [...qualifiedPrefix, '~' + name].join('::'), document),
+            type: 'ConjugatedPortDefinition',
+          });
+        }
       }
     }
 
@@ -71,9 +85,14 @@ export class SysMLScopeComputation implements ScopeComputation {
     const shortName = this.getShortName(node);
     if (shortName && shortName !== name) {
       exports.push(this.createDescription(node, shortName, document));
+      if (qualifiedPrefix.length > 0) {
+        exports.push(this.createDescription(node, [...qualifiedPrefix, shortName].join('::'), document));
+      }
     }
 
-    this.traverseChildren(node, (child) => this.collectExports(child, exports, document));
+    // Build qualified prefix for children: only namespaces contribute to the path
+    const childPrefix = name && this.isNamespace(node) ? [...qualifiedPrefix, name] : qualifiedPrefix;
+    this.traverseChildren(node, (child) => this.collectExports(child, exports, document, childPrefix));
   }
 
   private computeScopes(

@@ -1,8 +1,8 @@
 /**
- * @easy-sysml/parser
+ * @easy-sysml/grammar
  *
- * SysML v2 / KerML parser built on Langium.
- * Exports generated AST types, Langium modules, and a standalone parsing API.
+ * SysML v2 / KerML grammar definitions, generated AST types, and Langium modules.
+ * Also provides a standalone parsing API for convenience.
  */
 
 // Re-export generated Langium AST types and modules

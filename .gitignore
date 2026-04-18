@@ -4,6 +4,6 @@ out/
 *.tsbuildinfo
 .DS_Store
 v/
-packages/parser/src/generated/
+packages/grammar/src/generated/
 packages/stdlib/src/generated/
 apps/playground/src/generated/

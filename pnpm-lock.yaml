@@ -23,12 +23,12 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.5)
+      '@easy-sysml/grammar':
+        specifier: workspace:*
+        version: link:../../packages/grammar
       '@easy-sysml/language-server':
         specifier: workspace:*
         version: link:../../packages/language-server
-      '@easy-sysml/parser':
-        specifier: workspace:*
-        version: link:../../packages/parser
       '@google/genai':
         specifier: ^1.29.0
         version: 1.50.1
@@ -171,11 +171,30 @@ importers:
         specifier: ~5.8.3
         version: 5.8.3
 
+  packages/grammar:
+    dependencies:
+      langium:
+        specifier: ~4.2.2
+        version: 4.2.2
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      langium-cli:
+        specifier: ~4.2.0
+        version: 4.2.0
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vitest:
+        specifier: ^3.1.3
+        version: 3.2.4(@types/node@20.19.39)(jiti@2.6.1)(jsdom@29.0.2)(lightningcss@1.32.0)(tsx@4.21.0)
+
   packages/language-server:
     dependencies:
-      '@easy-sysml/parser':
+      '@easy-sysml/grammar':
         specifier: workspace:*
-        version: link:../parser
+        version: link:../grammar
       '@easy-sysml/stdlib':
         specifier: workspace:*
         version: link:../stdlib
@@ -199,30 +218,11 @@ importers:
         specifier: ~5.8.3
         version: 5.8.3
 
-  packages/parser:
-    dependencies:
-      langium:
-        specifier: ~4.2.2
-        version: 4.2.2
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
-      langium-cli:
-        specifier: ~4.2.0
-        version: 4.2.0
-      typescript:
-        specifier: ~5.8.3
-        version: 5.8.3
-      vitest:
-        specifier: ^3.1.3
-        version: 3.2.4(@types/node@20.19.39)(jiti@2.6.1)(jsdom@29.0.2)(lightningcss@1.32.0)(tsx@4.21.0)
-
   packages/stdlib:
     dependencies:
-      '@easy-sysml/parser':
+      '@easy-sysml/grammar':
         specifier: workspace:*
-        version: link:../parser
+        version: link:../grammar
       langium:
         specifier: ~4.2.2
         version: 4.2.2

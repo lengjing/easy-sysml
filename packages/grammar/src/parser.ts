@@ -76,7 +76,7 @@ function ensureServices() {
  *
  * @example
  * ```typescript
- * import { parseSysML } from '@easy-sysml/parser';
+ * import { parseSysML } from '@easy-sysml/grammar';
  *
  * const result = parseSysML(`
  *   package MySystem {

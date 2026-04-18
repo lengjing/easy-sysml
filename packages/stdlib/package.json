@@ -24,7 +24,7 @@
     "clean": "rm -rf dist *.tsbuildinfo src/generated"
   },
   "dependencies": {
-    "@easy-sysml/parser": "workspace:*",
+    "@easy-sysml/grammar": "workspace:*",
     "langium": "~4.2.2"
   },
   "devDependencies": {
