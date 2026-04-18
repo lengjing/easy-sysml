@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@easy-sysml/language-server": "workspace:*",
-    "@easy-sysml/stdlib": "workspace:*",
     "monaco-editor": "^0.52.2",
     "vscode-languageserver-protocol": "^3.17.5"
   },

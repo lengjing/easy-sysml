@@ -5,5 +5,5 @@ out/
 .DS_Store
 v/
 packages/grammar/src/generated/
-packages/stdlib/src/generated/
+packages/language-server/src/generated/
 apps/playground/src/generated/

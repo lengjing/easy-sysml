@@ -70,8 +70,8 @@ export function findStdlibPath(): string | null {
   }
 
   const candidates = [
-    path.resolve(moduleDir, '..', 'lib'),       // from dist/loader.js → lib/
-    path.resolve(moduleDir, '..', '..', 'lib'),  // from dist/src/loader.js → lib/
+    path.resolve(moduleDir, '..', '..', 'lib'),  // from dist/stdlib/loader.js → lib/
+    path.resolve(moduleDir, '..', 'lib'),         // from dist/loader.js → lib/
     path.resolve(moduleDir, 'lib'),               // from same dir
   ];
 
@@ -93,7 +93,7 @@ export function findStdlibPath(): string | null {
  *
  * @example
  * ```typescript
- * import { loadStdlib } from '@easy-sysml/stdlib';
+ * import { loadStdlib } from '@easy-sysml/language-server';
  *
  * const result = await loadStdlib(services.shared);
  * console.log(`Loaded ${result.filesLoaded} stdlib files in ${result.loadTimeMs}ms`);

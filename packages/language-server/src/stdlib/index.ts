@@ -1,5 +1,5 @@
 /**
- * @easy-sysml/stdlib
+ * Standard Library — Node.js Entry Point
  *
  * SysML v2 / KerML standard library files and loader.
  */

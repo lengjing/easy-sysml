@@ -25,7 +25,7 @@ import {
 import { registerSysMLLanguage, SYSML_LANGUAGE_ID } from './sysml-language';
 import { LanguageClient } from './language-client';
 import { log } from './log';
-import { STDLIB_FILES } from '@easy-sysml/stdlib/browser';
+import { STDLIB_FILES } from '@easy-sysml/language-server/stdlib/browser';
 
 // -- Configure Monaco workers ------------------------------------------------
 // Monaco needs web workers for editor features. We use the bundled workers.

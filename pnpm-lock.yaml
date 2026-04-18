@@ -135,9 +135,6 @@ importers:
       '@easy-sysml/language-server':
         specifier: workspace:*
         version: link:../../packages/language-server
-      '@easy-sysml/stdlib':
-        specifier: workspace:*
-        version: link:../../packages/stdlib
       monaco-editor:
         specifier: ^0.52.2
         version: 0.52.2
@@ -195,9 +192,6 @@ importers:
       '@easy-sysml/grammar':
         specifier: workspace:*
         version: link:../grammar
-      '@easy-sysml/stdlib':
-        specifier: workspace:*
-        version: link:../stdlib
       langium:
         specifier: ~4.2.2
         version: 4.2.2
@@ -210,22 +204,6 @@ importers:
       vscode-uri:
         specifier: ~3.1.0
         version: 3.1.0
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
-      typescript:
-        specifier: ~5.8.3
-        version: 5.8.3
-
-  packages/stdlib:
-    dependencies:
-      '@easy-sysml/grammar':
-        specifier: workspace:*
-        version: link:../grammar
-      langium:
-        specifier: ~4.2.2
-        version: 4.2.2
     devDependencies:
       '@types/node':
         specifier: ^20.0.0

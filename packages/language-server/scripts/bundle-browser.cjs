@@ -4,14 +4,15 @@
  * Reads all SysML/KerML standard library files from lib/
  * and generates a TypeScript module with their content as string literals.
  *
- * Output: src/generated/browser-bundle.ts
+ * Output: src/generated/stdlib-browser-bundle.ts
+ *         (compiled by tsc into dist/generated/stdlib-browser-bundle.js)
  */
 const fs = require('fs');
 const path = require('path');
 
 const libDir = path.resolve(__dirname, '../lib');
 const outDir = path.resolve(__dirname, '../src/generated');
-const outFile = path.join(outDir, 'browser-bundle.ts');
+const outFile = path.join(outDir, 'stdlib-browser-bundle.ts');
 
 if (!fs.existsSync(libDir)) {
   console.error(`[bundle-browser] stdlib lib/ directory not found at: ${libDir}`);
