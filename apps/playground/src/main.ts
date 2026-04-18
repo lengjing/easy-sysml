@@ -25,6 +25,7 @@ import {
 import { registerSysMLLanguage, SYSML_LANGUAGE_ID } from './sysml-language';
 import { LanguageClient } from './language-client';
 import { log } from './log';
+import { STDLIB_FILES } from './generated/stdlib-bundle';
 
 // -- Configure Monaco workers ------------------------------------------------
 // Monaco needs web workers for editor features. We use the bundled workers.
@@ -47,6 +48,34 @@ self.MonacoEnvironment = {
 
 // -- Constants ---------------------------------------------------------------
 const DOC_URI = 'inmemory:///model.sysml';
+const STDLIB_PREFIX = 'inmemory:///stdlib/';
+
+/**
+ * Ensure a read-only Monaco model exists for a stdlib file.
+ * Returns the Monaco URI if the model was created or already exists.
+ */
+function ensureStdlibModel(uri: string): monaco.Uri | null {
+  const normalized = normalizeUri(uri);
+  if (!normalized.startsWith(normalizeUri(STDLIB_PREFIX))) return null;
+
+  const filename = normalized.slice(normalizeUri(STDLIB_PREFIX).length);
+  const content = STDLIB_FILES[filename];
+  if (!content) {
+    log.debug(`Stdlib file not found in bundle: ${filename}`);
+    return null;
+  }
+
+  const monacoUri = monaco.Uri.parse(normalized);
+  let model = monaco.editor.getModel(monacoUri);
+  if (!model) {
+    model = monaco.editor.createModel(content, SYSML_LANGUAGE_ID, monacoUri);
+    log.debug(`Created stdlib model: ${filename}`);
+  }
+  return monacoUri;
+}
+
+/** Normalize URI slashes (server may strip extra slashes). */
+const normalizeUri = (u: string) => u.replace(/^(\w+:)\/*/, '$1///');
 
 const DEFAULT_CODE = `package Vehicle {
     part def Wheel {
@@ -76,11 +105,12 @@ async function main(): Promise<void> {
     // 2. Create the language client (starts the worker)
     const client = new LanguageClient();
 
-    // 3. Create the Monaco editor
+    // 3. Create the Monaco editor with an explicit model URI
     const container = document.getElementById('editor-container')!;
+    const mainModelUri = monaco.Uri.parse(DOC_URI);
+    const mainModel = monaco.editor.createModel(DEFAULT_CODE, SYSML_LANGUAGE_ID, mainModelUri);
     const editor = monaco.editor.create(container, {
-      value: DEFAULT_CODE,
-      language: SYSML_LANGUAGE_ID,
+      model: mainModel,
       theme: 'vs-dark',
       minimap: { enabled: true },
       fontSize: 14,
@@ -100,12 +130,63 @@ async function main(): Promise<void> {
     });
     log.info('Monaco editor created');
 
+    // UI elements for file navigation
+    const fileIndicator = document.getElementById('file-indicator')!;
+    const backBtn = document.getElementById('back-btn')!;
+
+    /** Switch editor to a different model, updating UI indicators. */
+    function showModel(targetModel: monaco.editor.ITextModel, selection?: monaco.IRange) {
+      editor.setModel(targetModel);
+      if (selection) {
+        editor.revealRangeInCenter(selection);
+        editor.setSelection(selection);
+      }
+      const isMain = targetModel.uri.toString() === mainModelUri.toString();
+      backBtn.style.display = isMain ? 'none' : 'inline-block';
+      fileIndicator.textContent = isMain ? '' : `— ${targetModel.uri.path.split('/').pop()}`;
+      if (!isMain) {
+        editor.updateOptions({ readOnly: true });
+      } else {
+        editor.updateOptions({ readOnly: false });
+      }
+    }
+
+    // "Back" button returns to user document
+    backBtn.onclick = () => {
+      const model = monaco.editor.getModel(mainModelUri);
+      if (model) {
+        showModel(model);
+        log.info('Returned to main document');
+      }
+    };
+
+    // Register opener to handle go-to-definition across files (e.g. stdlib).
+    // When Monaco opens a definition in another model, we swap the editor model
+    // and update the UI to show a "Back" button.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const editorService = (editor as any)._codeEditorService;
+    if (editorService) {
+      const origOpenCodeEditor = editorService.openCodeEditor?.bind(editorService);
+      editorService.openCodeEditor = async (
+        input: { resource: monaco.Uri; options?: { selection?: monaco.IRange } },
+        source: monaco.editor.ICodeEditor,
+      ) => {
+        const targetUri = input.resource;
+        const targetModel = monaco.editor.getModel(targetUri);
+        if (targetModel && targetModel !== source.getModel()) {
+          showModel(targetModel, input.options?.selection);
+          log.info(`Opened: ${targetUri.path.split('/').pop()}`);
+          return source;
+        }
+        return origOpenCodeEditor?.(input, source);
+      };
+    }
+
     // 4. Register LSP-backed providers
 
     // -- Diagnostics (published by server) --
     // The server may normalise the URI (e.g. strip extra slashes), so
     // compare by normalising both sides.
-    const normalizeUri = (u: string) => u.replace(/^(\w+:)\/*/, '$1///');
 
     client.onDiagnostics((params) => {
       const model = editor.getModel();
@@ -239,26 +320,29 @@ async function main(): Promise<void> {
 
           const locations = Array.isArray(result) ? result : [result];
           return locations.map((loc) => {
+            let locUri: string;
+            let range: { start: { line: number; character: number }; end: { line: number; character: number } };
+
             if ('targetUri' in loc) {
               const ll = loc as LocationLink;
-              return {
-                uri: monaco.Uri.parse(ll.targetUri),
-                range: {
-                  startLineNumber: ll.targetRange.start.line + 1,
-                  startColumn: ll.targetRange.start.character + 1,
-                  endLineNumber: ll.targetRange.end.line + 1,
-                  endColumn: ll.targetRange.end.character + 1,
-                },
-              };
+              locUri = ll.targetUri;
+              range = ll.targetRange;
+            } else {
+              const l = loc as Location;
+              locUri = l.uri;
+              range = l.range;
             }
-            const l = loc as Location;
+
+            // Ensure a model exists for stdlib files so Monaco can navigate
+            const stdlibModelUri = ensureStdlibModel(locUri);
+
             return {
-              uri: monaco.Uri.parse(l.uri),
+              uri: stdlibModelUri ?? monaco.Uri.parse(normalizeUri(locUri)),
               range: {
-                startLineNumber: l.range.start.line + 1,
-                startColumn: l.range.start.character + 1,
-                endLineNumber: l.range.end.line + 1,
-                endColumn: l.range.end.character + 1,
+                startLineNumber: range.start.line + 1,
+                startColumn: range.start.character + 1,
+                endLineNumber: range.end.line + 1,
+                endColumn: range.end.character + 1,
               },
             };
           });
