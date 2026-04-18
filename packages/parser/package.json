@@ -20,11 +20,11 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "langium": "~3.3.1"
+    "langium": "~4.2.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "langium-cli": "~3.3.0",
+    "langium-cli": "~4.2.0",
     "typescript": "~5.8.3",
     "vitest": "^3.1.3"
   }

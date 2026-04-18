@@ -1,5 +1,6 @@
 import React from 'react';
 import { Code, AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { SysMLEditor } from '../editor/SysMLEditor';
 
 interface KerMLEditorProps {
   kermlCode: string;
@@ -43,19 +44,11 @@ export const KerMLEditor = ({
           从画布同步
         </button>
       </div>
-      <div className="flex-1 relative overflow-hidden group/editor">
-        <textarea
+      <div className="flex-1 relative overflow-hidden">
+        <SysMLEditor
           value={kermlCode}
-          onChange={(e) => setKermlCode(e.target.value)}
-          className="w-full h-full p-4 font-mono text-[11px] bg-transparent text-[var(--text-main)] outline-none resize-none custom-scrollbar leading-relaxed selection:bg-blue-500/30"
-          spellCheck={false}
-          placeholder="// 在此输入 KerML 代码..."
+          onChange={setKermlCode}
         />
-        <div className="absolute bottom-4 right-4 opacity-0 group-hover/editor:opacity-100 transition-opacity">
-          <div className="px-2 py-1 bg-[var(--bg-main)] border border-[var(--border-color)] rounded text-[9px] text-[var(--text-muted)] shadow-sm">
-            {kermlCode.split('\n').length} Lines
-          </div>
-        </div>
       </div>
     </div>
   );
