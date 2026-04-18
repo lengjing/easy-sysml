@@ -32,7 +32,7 @@ export class SysMLScopeComputation implements ScopeComputation {
     const exports: AstNodeDescription[] = [];
     const root = document.parseResult?.value;
     if (!root) return exports;
-    this.collectExports(root, exports, document);
+    this.collectExports(root, exports, document, []);
     return exports;
   }
 
@@ -48,10 +48,21 @@ export class SysMLScopeComputation implements ScopeComputation {
     node: AstNode,
     exports: AstNodeDescription[],
     document: LangiumDocument,
+    qualifiedPrefix: string[],
   ): void {
     const name = this.getName(node);
     if (name) {
+      // Export with simple name
       exports.push(this.createDescription(node, name, document));
+
+      // Export all qualified name suffixes so that references like
+      // "Anything::self" resolve (not just "Base::Anything::self").
+      if (qualifiedPrefix.length > 0) {
+        for (let i = 0; i < qualifiedPrefix.length; i++) {
+          const qn = [...qualifiedPrefix.slice(i), name].join('::');
+          exports.push(this.createDescription(node, qn, document));
+        }
+      }
 
       const container = (node as any).$container as AstNode | undefined;
       if (container && this.isMembership(container)) {
@@ -60,10 +71,17 @@ export class SysMLScopeComputation implements ScopeComputation {
 
       // Conjugated port definition (synthetic ~Name entry per SysML v2 spec)
       if (node.$type === 'PortDefinition') {
+        const conjugatedName = '~' + name;
         exports.push({
-          ...this.createDescription(node, '~' + name, document),
+          ...this.createDescription(node, conjugatedName, document),
           type: 'ConjugatedPortDefinition',
         });
+        for (let i = 0; i < qualifiedPrefix.length; i++) {
+          exports.push({
+            ...this.createDescription(node, [...qualifiedPrefix.slice(i), conjugatedName].join('::'), document),
+            type: 'ConjugatedPortDefinition',
+          });
+        }
       }
     }
 
@@ -71,9 +89,14 @@ export class SysMLScopeComputation implements ScopeComputation {
     const shortName = this.getShortName(node);
     if (shortName && shortName !== name) {
       exports.push(this.createDescription(node, shortName, document));
+      for (let i = 0; i < qualifiedPrefix.length; i++) {
+        exports.push(this.createDescription(node, [...qualifiedPrefix.slice(i), shortName].join('::'), document));
+      }
     }
 
-    this.traverseChildren(node, (child) => this.collectExports(child, exports, document));
+    // Build qualified prefix for children: only namespaces contribute to the path
+    const childPrefix = name && this.isNamespace(node) ? [...qualifiedPrefix, name] : qualifiedPrefix;
+    this.traverseChildren(node, (child) => this.collectExports(child, exports, document, childPrefix));
   }
 
   private computeScopes(
@@ -115,11 +138,15 @@ export class SysMLScopeComputation implements ScopeComputation {
   }
 
   private isNamespace(node: AstNode): boolean {
+    const n = node as any;
+    // Any named element that owns members acts as a namespace for
+    // qualified name resolution (e.g., DataType, Association, etc.)
+    if (Array.isArray(n.ownedRelationship) && n.ownedRelationship.length > 0) {
+      return true;
+    }
     const t = node.$type;
     return t === 'Namespace' || t === 'Package' || t === 'LibraryPackage' ||
-           t === 'RootNamespace' || (typeof t === 'string' && t.endsWith('Definition')) ||
-           (typeof t === 'string' && t.endsWith('Usage')) ||
-           t === 'Type' || t === 'Class' || t === 'Classifier' || t === 'Feature';
+           t === 'RootNamespace';
   }
 
   private traverseChildren(node: AstNode, callback: (child: AstNode) => void): void {
@@ -136,6 +163,11 @@ export class SysMLScopeComputation implements ScopeComputation {
 
     if (Array.isArray(n.ownedRelationship)) {
       for (const rel of n.ownedRelationship) {
+        // Emit the relationship node itself if it carries a name
+        // (e.g., AliasMember / Membership with memberName).
+        if (rel?.memberName || rel?.memberShortName) {
+          emit(rel);
+        }
         if (Array.isArray(rel?.ownedRelatedElement)) {
           for (const elem of rel.ownedRelatedElement) emit(elem);
         } else if (rel?.ownedRelatedElement) {

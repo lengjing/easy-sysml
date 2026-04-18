@@ -15,7 +15,7 @@ import {
   KerMLGeneratedModule,
   SysMLLanguageMetaData,
   KerMLLanguageMetaData,
-} from '@easy-sysml/parser';
+} from '@easy-sysml/grammar';
 import { SysMLNameProvider } from './sysml-name-provider.js';
 import { SysMLScopeComputation } from './sysml-scope-computation.js';
 import { createSysMLScopeProvider } from './sysml-scope-provider.js';

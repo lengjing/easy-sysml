@@ -21,7 +21,7 @@ import { inject } from 'langium';
 import {
   SysMLGeneratedModule,
   SysMLGeneratedSharedModule,
-} from '@easy-sysml/parser';
+} from '@easy-sysml/grammar';
 import { SYSML_LANGUAGE_ID } from './sysml-language';
 
 /* ------------------------------------------------------------------ */

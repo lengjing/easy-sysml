@@ -10,7 +10,7 @@ import { DefaultDocumentValidator } from 'langium';
 import type { LangiumDocument, ValidationOptions, LangiumCoreServices } from 'langium';
 import type { Diagnostic } from 'vscode-languageserver';
 import { filterDiagnostics } from './diagnostic-filter.js';
-import { isStandardLibraryDocument } from '@easy-sysml/stdlib';
+import { isStandardLibraryDocument } from '../stdlib/loader.js';
 
 export class FilteringDocumentValidator extends DefaultDocumentValidator {
   private filteringEnabled: boolean;

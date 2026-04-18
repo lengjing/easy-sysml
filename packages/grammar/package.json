@@ -1,9 +1,9 @@
 {
-  "name": "@easy-sysml/parser",
+  "name": "@easy-sysml/grammar",
   "version": "0.1.0",
   "type": "module",
   "license": "LGPL-3.0-or-later",
-  "description": "SysML v2 / KerML parser built on Langium",
+  "description": "SysML v2 / KerML grammar definitions, generated AST types, and Langium modules",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

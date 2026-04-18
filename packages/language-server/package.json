@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "license": "LGPL-3.0-or-later",
-  "description": "SysML v2 Language Server Protocol implementation",
+  "description": "SysML v2 Language Server Protocol implementation with standard library",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -18,19 +18,27 @@
     "./main-browser": {
       "types": "./dist/main-browser.d.ts",
       "import": "./dist/main-browser.js"
+    },
+    "./stdlib": {
+      "types": "./dist/stdlib/index.d.ts",
+      "import": "./dist/stdlib/index.js"
+    },
+    "./stdlib/browser": {
+      "types": "./dist/stdlib/browser.d.ts",
+      "import": "./dist/stdlib/browser.js"
     }
   },
   "bin": {
     "sysml-language-server": "./bin/sysml-language-server.js"
   },
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && node scripts/bundle-browser.cjs",
+    "test": "vitest run",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@easy-sysml/parser": "workspace:*",
-    "@easy-sysml/stdlib": "workspace:*",
+    "@easy-sysml/grammar": "workspace:*",
     "langium": "~4.2.2",
     "vscode-languageserver": "~9.0.1",
     "vscode-languageserver-textdocument": "~1.0.12",
@@ -38,6 +46,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "~5.8.3"
+    "typescript": "~5.8.3",
+    "vitest": "^3.1.3"
   }
 }

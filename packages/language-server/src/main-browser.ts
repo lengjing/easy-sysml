@@ -20,7 +20,7 @@ import {
   createConnection,
 } from 'vscode-languageserver/browser.js';
 import { createSysMLBrowserServices } from './sysml-browser-module.js';
-import { STDLIB_FILES, loadStdlibBrowser } from '@easy-sysml/stdlib/browser';
+import { STDLIB_FILES, loadStdlibBrowser } from './stdlib/browser.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const worker = globalThis as any;

@@ -70,6 +70,11 @@ export class LanguageClient {
     this.connection.onNotification(
       PublishDiagnosticsNotification.type,
       (params) => {
+        // Skip logging diagnostics for stdlib documents — linking errors
+        // in stdlib files are expected and non-actionable for the user.
+        if (params.uri.includes('/stdlib/')) {
+          return;
+        }
         log.info(
           `Diagnostics received: ${params.diagnostics.length} issue(s) for ${params.uri}`,
         );
