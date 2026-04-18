@@ -135,9 +135,9 @@ importers:
       '@easy-sysml/language-server':
         specifier: workspace:*
         version: link:../../packages/language-server
-      langium:
-        specifier: ~4.2.2
-        version: 4.2.2
+      '@easy-sysml/stdlib':
+        specifier: workspace:*
+        version: link:../../packages/stdlib
       monaco-editor:
         specifier: ^0.52.2
         version: 0.52.2

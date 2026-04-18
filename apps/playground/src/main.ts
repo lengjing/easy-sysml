@@ -25,7 +25,7 @@ import {
 import { registerSysMLLanguage, SYSML_LANGUAGE_ID } from './sysml-language';
 import { LanguageClient } from './language-client';
 import { log } from './log';
-import { STDLIB_FILES } from './generated/stdlib-bundle';
+import { STDLIB_FILES } from '@easy-sysml/stdlib/browser';
 
 // -- Configure Monaco workers ------------------------------------------------
 // Monaco needs web workers for editor features. We use the bundled workers.
@@ -420,10 +420,16 @@ async function main(): Promise<void> {
     await client.didOpen(DOC_URI, DEFAULT_CODE);
     log.info('Document opened, waiting for diagnostics...');
 
-    // 6. Forward content changes to the language server
+    // 6. Forward content changes to the language server (debounced)
+    let changeTimer: ReturnType<typeof setTimeout> | undefined;
     editor.onDidChangeModelContent(() => {
-      const text = editor.getValue();
-      client.didChange(DOC_URI, text);
+      if (changeTimer !== undefined) {
+        clearTimeout(changeTimer);
+      }
+      changeTimer = setTimeout(() => {
+        const text = editor.getValue();
+        client.didChange(DOC_URI, text);
+      }, 300);
     });
 
     // 7. Mark as connected

@@ -10,13 +10,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
     }
   },
   "scripts": {
-    "build": "tsc --build",
+    "generate:browser-bundle": "node scripts/bundle-browser.cjs",
+    "build": "node scripts/bundle-browser.cjs && tsc --build",
     "test": "vitest run",
-    "lint": "tsc --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "lint": "node scripts/bundle-browser.cjs && tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo src/generated"
   },
   "dependencies": {
     "@easy-sysml/parser": "workspace:*",
