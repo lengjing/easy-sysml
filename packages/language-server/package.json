@@ -32,11 +32,10 @@
     "sysml-language-server": "./bin/sysml-language-server.js"
   },
   "scripts": {
-    "generate:browser-bundle": "node scripts/bundle-browser.cjs",
-    "build": "node scripts/bundle-browser.cjs && tsc --build",
+    "build": "tsc --build && node scripts/bundle-browser.cjs",
     "test": "vitest run",
-    "lint": "node scripts/bundle-browser.cjs && tsc --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo src/generated"
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
     "@easy-sysml/grammar": "workspace:*",
