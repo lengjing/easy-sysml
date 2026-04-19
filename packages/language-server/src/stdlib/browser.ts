@@ -5,7 +5,7 @@
  * pre-bundled stdlib file contents. No Node.js dependencies.
  */
 
-export { loadStdlibBrowser } from './browser-loader.js';
+export { loadStdlibBrowser, isStandardLibraryDocument } from './browser-loader.js';
 export type { StdlibBrowserResult } from './browser-loader.js';
 // stdlib-browser-bundle.js is generated directly into dist/ by scripts/bundle-browser.cjs
 export { STDLIB_FILES } from '../stdlib-browser-bundle.js';

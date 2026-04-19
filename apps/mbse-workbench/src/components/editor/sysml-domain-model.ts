@@ -83,6 +83,7 @@ function classifySymbol(sym: DocumentSymbol): { kind: string; category: SysMLCat
   if (detail.includes('attribute def'))   return { kind: 'AttributeDefinition', category: 'definition' };
   if (detail.includes('port def'))        return { kind: 'PortDefinition', category: 'definition' };
   if (detail.includes('interface def'))   return { kind: 'InterfaceDefinition', category: 'definition' };
+  if (detail.includes('flow connection def')) return { kind: 'FlowConnectionDefinition', category: 'definition' };
   if (detail.includes('connection def'))  return { kind: 'ConnectionDefinition', category: 'definition' };
   if (detail.includes('allocation def'))  return { kind: 'AllocationDefinition', category: 'definition' };
   if (detail.includes('action def'))      return { kind: 'ActionDefinition', category: 'behavior' };
@@ -91,10 +92,10 @@ function classifySymbol(sym: DocumentSymbol): { kind: string; category: SysMLCat
   if (detail.includes('constraint def'))  return { kind: 'ConstraintDefinition', category: 'constraint' };
   if (detail.includes('requirement def')) return { kind: 'RequirementDefinition', category: 'requirement' };
   if (detail.includes('concern def'))     return { kind: 'ConcernDefinition', category: 'requirement' };
-  if (detail.includes('case def'))        return { kind: 'CaseDefinition', category: 'behavior' };
   if (detail.includes('analysis case def')) return { kind: 'AnalysisCaseDefinition', category: 'behavior' };
   if (detail.includes('verification case def')) return { kind: 'VerificationCaseDefinition', category: 'behavior' };
   if (detail.includes('use case def'))    return { kind: 'UseCaseDefinition', category: 'behavior' };
+  if (detail.includes('case def'))        return { kind: 'CaseDefinition', category: 'behavior' };
   if (detail.includes('view def'))        return { kind: 'ViewDefinition', category: 'definition' };
   if (detail.includes('viewpoint def'))   return { kind: 'ViewpointDefinition', category: 'definition' };
   if (detail.includes('rendering def'))   return { kind: 'RenderingDefinition', category: 'definition' };
@@ -102,7 +103,7 @@ function classifySymbol(sym: DocumentSymbol): { kind: string; category: SysMLCat
   if (detail.includes('occurrence def'))  return { kind: 'OccurrenceDefinition', category: 'definition' };
   if (detail.includes('item def'))        return { kind: 'ItemDefinition', category: 'definition' };
   if (detail.includes('enum def'))        return { kind: 'EnumerationDefinition', category: 'definition' };
-  if (detail.includes('flow connection def')) return { kind: 'FlowConnectionDefinition', category: 'definition' };
+  // flow connection def already handled above
 
   // Usages
   if (detail.includes('part'))            return { kind: 'PartUsage', category: 'usage' };

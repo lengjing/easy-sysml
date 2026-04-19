@@ -9,14 +9,15 @@ import {
 } from 'lucide-react';
 import { TreeItem } from './TreeItem';
 import { ContextMenu } from './ContextMenu';
-import type { DomainModel, DomainElement } from '../editor/sysml-domain-model';
+import type { DomainModel, DomainElement } from './editor/sysml-domain-model';
+import type { SimpleElement } from './DiagramCanvas';
 
 interface SidebarLeftProps {
   visible: boolean;
   activeTab: string;
   onAddElement?: (type: string) => void;
   onDropElement?: (draggedId: string, targetId: string) => void;
-  nodes: any[];
+  nodes: SimpleElement[];
   domainModel?: DomainModel | null;
 }
 
@@ -185,8 +186,8 @@ export const SidebarLeft = ({
               {hasDomainModel ? (
                 <DomainTreeItems elements={packages} onContextMenu={handleContextMenu} onDrop={handleDrop} />
               ) : (
-                nodes.filter(n => n.data.type === 'Package' && !n.parentNode).map(n => (
-                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Package} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                nodes.filter(n => n.type === 'Package' && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.label} icon={Package} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
                 ))
               )}
             </TreeItem>
@@ -196,8 +197,8 @@ export const SidebarLeft = ({
               {hasDomainModel ? (
                 <DomainTreeItems elements={definitions} onContextMenu={handleContextMenu} onDrop={handleDrop} />
               ) : (
-                nodes.filter(n => ['Block', 'DataType'].includes(n.data.type) && !n.parentNode).map(n => (
-                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Box} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                nodes.filter(n => ['Block', 'DataType'].includes(n.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.label} icon={Box} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
                 ))
               )}
             </TreeItem>
@@ -207,8 +208,8 @@ export const SidebarLeft = ({
               {hasDomainModel ? (
                 <DomainTreeItems elements={usages} onContextMenu={handleContextMenu} onDrop={handleDrop} />
               ) : (
-                nodes.filter(n => ['Part', 'Port', 'Interface', 'Item', 'Attribute'].includes(n.data.type) && !n.parentNode).map(n => (
-                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Component} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                nodes.filter(n => ['Part', 'Port', 'Interface', 'Item', 'Attribute'].includes(n.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.label} icon={Component} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
                 ))
               )}
             </TreeItem>
@@ -221,8 +222,8 @@ export const SidebarLeft = ({
                   <DomainTreeItems elements={constraints} onContextMenu={handleContextMenu} onDrop={handleDrop} />
                 </>
               ) : (
-                nodes.filter(n => ['Requirement', 'Constraint'].includes(n.data.type) && !n.parentNode).map(n => (
-                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={n.data.type === 'Requirement' ? Info : ShieldCheck} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                nodes.filter(n => ['Requirement', 'Constraint'].includes(n.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.label} icon={n.type === 'Requirement' ? Info : ShieldCheck} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
                 ))
               )}
             </TreeItem>
@@ -232,8 +233,8 @@ export const SidebarLeft = ({
               {hasDomainModel ? (
                 <DomainTreeItems elements={behaviors} onContextMenu={handleContextMenu} onDrop={handleDrop} />
               ) : (
-                nodes.filter(n => ['Action', 'State', 'Calculation'].includes(n.data.type) && !n.parentNode).map(n => (
-                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Zap} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                nodes.filter(n => ['Action', 'State', 'Calculation'].includes(n.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.label} icon={Zap} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
                 ))
               )}
             </TreeItem>

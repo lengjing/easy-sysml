@@ -1,19 +1,19 @@
 import React from 'react';
-import { Code, CheckCircle2, RefreshCw } from 'lucide-react';
-import { SysMLEditor } from '../editor/SysMLEditor';
+import { Code, CheckCircle2 } from 'lucide-react';
+import { SysMLEditor } from './editor/SysMLEditor';
 import type { DocumentSymbol } from 'vscode-languageserver-protocol';
 
-interface KerMLEditorProps {
-  kermlCode: string;
-  setKermlCode: (code: string) => void;
+interface SysMLEditorPanelProps {
+  code: string;
+  setCode: (code: string) => void;
   onDocumentSymbols?: (symbols: DocumentSymbol[]) => void;
 }
 
-export const KerMLEditor = ({
-  kermlCode,
-  setKermlCode,
+export const SysMLEditorPanel = ({
+  code,
+  setCode,
   onDocumentSymbols,
-}: KerMLEditorProps) => {
+}: SysMLEditorPanelProps) => {
   return (
     <div className="w-1/2 border-l border-[var(--border-color)] bg-[var(--bg-sidebar)] flex flex-col transition-all duration-300">
       <div className="h-10 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-header)]/50">
@@ -30,8 +30,8 @@ export const KerMLEditor = ({
       </div>
       <div className="flex-1 relative overflow-hidden">
         <SysMLEditor
-          value={kermlCode}
-          onChange={setKermlCode}
+          value={code}
+          onChange={setCode}
           onDocumentSymbols={onDocumentSymbols}
         />
       </div>

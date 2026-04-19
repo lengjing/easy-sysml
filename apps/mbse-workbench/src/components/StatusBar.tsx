@@ -1,12 +1,18 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useViewport } from 'reactflow';
 import { MousePointer2, ZoomIn, CheckCircle2, History, Terminal } from 'lucide-react';
 
-interface StatusBarProps {
-  mousePos: { x: number; y: number };
-  zoom: number;
-}
+export const StatusBar = () => {
+  const { zoom } = useViewport();
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-export const StatusBar = ({ mousePos, zoom }: StatusBarProps) => {
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      setMousePos({ x: Math.round(e.clientX), y: Math.round(e.clientY) });
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
   return (
     <footer className="h-7 border-t border-[var(--border-color)] bg-[var(--bg-header)] flex items-center justify-between px-3 text-[10px] text-[var(--text-muted)] font-medium transition-colors duration-200">
       <div className="flex items-center gap-4">

@@ -27,6 +27,7 @@ import { FilteringDocumentValidator } from './validation/filtering-document-vali
 import { SysMLDocumentSymbolProvider } from './sysml-document-symbol-provider.js';
 import { SysMLHoverProvider } from './sysml-hover-provider.js';
 import { SysMLWorkspaceManager } from './workspace-manager.js';
+import { SysMLDocumentBuilder } from './sysml-document-builder.js';
 
 export type SysMLServices = LangiumCoreServices;
 export type KerMLServices = LangiumCoreServices;
@@ -76,6 +77,7 @@ export function createSysMLServices(context: DefaultSharedModuleContext): {
 const SysMLSharedModule: Module<LangiumSharedServices, any> = {
   workspace: {
     WorkspaceManager: (services: LangiumSharedServices) => new SysMLWorkspaceManager(services),
+    DocumentBuilder: (services: LangiumSharedServices) => new SysMLDocumentBuilder(services),
   },
 };
 

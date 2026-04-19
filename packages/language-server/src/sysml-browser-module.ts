@@ -21,6 +21,7 @@ import { SysMLScopeComputation } from './sysml-scope-computation.js';
 import { createSysMLScopeProvider } from './sysml-scope-provider.js';
 import { SysMLDocumentSymbolProvider } from './sysml-document-symbol-provider.js';
 import { SysMLHoverProvider } from './sysml-hover-provider.js';
+import { SysMLDocumentBuilder } from './sysml-document-builder.js';
 
 export type SysMLServices = LangiumCoreServices;
 export type KerMLServices = LangiumCoreServices;
@@ -47,6 +48,7 @@ export function createSysMLBrowserServices(context: DefaultSharedModuleContext):
   const shared = inject(
     createDefaultSharedModule(context),
     SysMLGeneratedSharedModule,
+    SysMLBrowserSharedModule,
   );
 
   const SysML = inject(
@@ -66,6 +68,12 @@ export function createSysMLBrowserServices(context: DefaultSharedModuleContext):
 
   return { shared, SysML, KerML };
 }
+
+const SysMLBrowserSharedModule: Module<LangiumSharedServices, any> = {
+  workspace: {
+    DocumentBuilder: (services: LangiumSharedServices) => new SysMLDocumentBuilder(services),
+  },
+};
 
 const SysMLBrowserModule: Module<SysMLServices, any> = {
   LanguageMetaData: () => SysMLProductionMetaData,

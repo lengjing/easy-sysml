@@ -53,6 +53,7 @@ export async function loadStdlibBrowser(
         }
 
         const document = documentFactory.fromString(content, uri);
+        (document as any).isStandard = true;
         langiumDocuments.addDocument(document);
         allDocuments.push(document);
         loaded++;
@@ -84,4 +85,11 @@ export async function loadStdlibBrowser(
     errors,
     loadTimeMs: Date.now() - start,
   };
+}
+
+/**
+ * Check if a Langium document is a standard library document (browser-compatible).
+ */
+export function isStandardLibraryDocument(doc: LangiumDocument): boolean {
+  return (doc as any).isStandard === true;
 }

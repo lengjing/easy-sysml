@@ -317,21 +317,12 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
     [value],
   );
 
-  /** Propagate content changes and notify LSP (debounced). */
-  const changeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handleChange = useCallback(
     (val: string | undefined) => {
       const text = val ?? '';
       onChange(text);
 
-      if (changeTimerRef.current !== undefined) {
-        clearTimeout(changeTimerRef.current);
-      }
-      changeTimerRef.current = setTimeout(() => {
-        if (docOpenRef.current) {
-          getClient().didChange(DOC_URI, text);
-        }
-      }, 300);
+      getClient().didChange(DOC_URI, text);
     },
     [onChange],
   );
@@ -355,9 +346,6 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
   /** Cleanup on unmount. */
   useEffect(() => {
     return () => {
-      if (changeTimerRef.current !== undefined) {
-        clearTimeout(changeTimerRef.current);
-      }
       if (docOpenRef.current) {
         getClient().didClose(DOC_URI);
         docOpenRef.current = false;

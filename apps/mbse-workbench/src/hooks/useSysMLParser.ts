@@ -1,5 +1,5 @@
 /**
- * Hook: useKerMLParser
+ * Hook: useSysMLParser
  *
  * Converts LSP DocumentSymbol[] (pushed from SysMLEditor) into
  * ReactFlow nodes and edges for the model canvas. No redundant parsing.
@@ -11,7 +11,7 @@ import {
   documentSymbolsToDomainModel,
   type DomainModel,
   type DomainElement,
-} from '../editor/sysml-domain-model';
+} from '../components/editor/sysml-domain-model';
 
 /* ------------------------------------------------------------------ */
 /*  SysML kind → display type mapping                                 */
@@ -145,7 +145,7 @@ function buildGraph(elements: DomainElement[]) {
 /*  Hook                                                              */
 /* ------------------------------------------------------------------ */
 
-export function useKerMLParser(kermlCode: string, showCode: boolean) {
+export function useSysMLParser(kermlCode: string, showCode: boolean) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [domainModel, setDomainModel] = useState<DomainModel | null>(null);

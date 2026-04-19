@@ -1,38 +1,20 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import ReactFlow, { 
-  Background, 
-  Controls, 
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  addEdge,
-  Connection,
-  Edge,
-  ReactFlowProvider,
-  BackgroundVariant,
-  MarkerType,
-} from 'reactflow';
-import 'reactflow/dist/style.css';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { ReactFlowProvider } from 'reactflow';
 import { AnimatePresence } from 'motion/react';
 import { Box } from 'lucide-react';
 
-import { cn } from './lib/utils';
 import { Project } from './types';
 import { initialProject } from './data/initialProject';
-import { SysMLNode } from './components/SysMLNode';
+import { DiagramCanvas, DiagramCanvasHandle, SimpleElement } from './components/DiagramCanvas';
 import { Header } from './components/Header';
 import { SidebarLeft } from './components/SidebarLeft';
 import { SidebarRight } from './components/SidebarRight';
 import { ActivityBar } from './components/ActivityBar';
 import { Toolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
-import { KerMLEditor } from './components/KerMLEditor';
+import { SysMLEditorPanel } from './components/SysMLEditorPanel';
 import { TraceabilityMatrix } from './components/TraceabilityMatrix';
-import { useKerMLParser } from './hooks/useKerMLParser';
-
-const nodeTypes = {
-  sysml: SysMLNode,
-};
+import { useSysMLParser } from './hooks/useSysMLParser';
 
 function WorkbenchContent() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
@@ -40,9 +22,17 @@ function WorkbenchContent() {
   const [activeTab, setActiveTab] = useState<'modeling' | 'traceability' | 'simulation' | 'reports' | 'search' | 'database'>('modeling');
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
   const [showCode, setShowCode] = useState(false);
+
+  // Structural element list for sidebar (no positions — only updated on add/remove)
+  const [elements, setElements] = useState<SimpleElement[]>(() =>
+    initialProject.diagrams[0].nodes.map(n => ({
+      id: n.id,
+      label: (n.data as any).label ?? '',
+      type: (n.data as any).type ?? '',
+      parentNode: n.parentNode,
+    }))
+  );
 
   const [kermlCode, setKermlCode] = useState(`package UAV_System {
     part def Control_Subsystem {
@@ -56,164 +46,67 @@ function WorkbenchContent() {
 }`);
 
   useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
-  const toggleTheme = useCallback(() => setTheme(prev => prev === 'dark' ? 'light' : 'dark'), []);
+  const toggleTheme = useCallback(() => setTheme(prev => (prev === 'dark' ? 'light' : 'dark')), []);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(project.diagrams[0].nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(project.diagrams[0].edges);
+  // Ref to the canvas — used to push addNode / dropNode / setExternalNodes
+  const canvasRef = useRef<DiagramCanvasHandle>(null);
 
-  // Use LSP document symbols (no redundant parsing)
-  const {
-    nodes: parsedNodes,
-    edges: parsedEdges,
-    domainModel,
-    handleDocumentSymbols,
-  } = useKerMLParser(kermlCode, showCode);
+  // LSP document symbols → parsed nodes/edges
+  const { nodes: parsedNodes, edges: parsedEdges, domainModel, handleDocumentSymbols } =
+    useSysMLParser(kermlCode, showCode);
 
+  // Push parsed nodes into the canvas when available
   useEffect(() => {
     if (showCode && parsedNodes.length > 0) {
-      setNodes(parsedNodes);
-      setEdges(parsedEdges);
+      canvasRef.current?.setExternalNodes(parsedNodes, parsedEdges);
     }
-  }, [parsedNodes, parsedEdges, showCode, setNodes, setEdges]);
+  }, [parsedNodes, parsedEdges, showCode]);
 
-  const onConnect = useCallback(
-    (params: Connection | Edge) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
-  );
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    setMousePos({ x: Math.round(e.clientX), y: Math.round(e.clientY) });
+  // Stable callbacks for sidebar actions — call into canvas via ref
+  const addNewElement = useCallback((type: string = 'Block') => {
+    canvasRef.current?.addNode(type);
   }, []);
 
-  const addNewElement = useCallback((type: string = 'Block') => {
-    const id = `new-node-${nodes.length + 1}`;
-    const newNode = {
-      id,
-      type: 'sysml',
-      position: { x: 100 + Math.random() * 400, y: 100 + Math.random() * 400 },
-      data: {
-        label: `New ${type} ${nodes.length + 1}`,
-        type: type,
-        kind: type,
-        detail: type.toLowerCase(),
-        category: 'other',
-        status: 'Draft',
-        properties: {},
-        childCount: 0,
-      }
-    };
-    setNodes((nds) => nds.concat(newNode));
-  }, [nodes.length, setNodes]);
-
   const handleDropElement = useCallback((draggedId: string, targetId: string) => {
-    setNodes((nds) => {
-      const draggedNode = nds.find(n => n.id === draggedId);
-      if (!draggedNode) return nds;
+    canvasRef.current?.dropNode(draggedId, targetId);
+  }, []);
 
-      // If dropped on a root category, clear parentNode
-      if (['package-root', 'req-root', 'struct-root', 'behavior-root'].includes(targetId)) {
-        return nds.map(n => n.id === draggedId ? { ...n, parentNode: undefined, extent: undefined } : n);
-      }
-
-      // Otherwise, set parentNode to targetId
-      const targetNode = nds.find(n => n.id === targetId);
-      if (!targetNode) return nds;
-
-      return nds.map(n => {
-        if (n.id === draggedId) {
-          return { 
-            ...n, 
-            parentNode: targetId, 
-            extent: 'parent',
-            position: { x: 20, y: 40 }
-          };
-        }
-        return n;
-      });
-    });
-  }, [setNodes]);
-
-  const flowCanvas = useMemo(() => (
-    <div className={cn("flex-1 relative transition-all duration-300", showCode ? "w-1/2" : "w-full")}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onMove={(_, viewport) => setZoom(viewport.zoom)}
-        fitView
-        nodeTypes={nodeTypes}
-        snapToGrid={true}
-        snapGrid={[10, 10]}
-        defaultEdgeOptions={{ 
-          type: 'smoothstep',
-          animated: true,
-          style: { strokeWidth: 1.5, stroke: theme === 'dark' ? '#64748b' : '#94a3b8' },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 20,
-            height: 20,
-            color: theme === 'dark' ? '#64748b' : '#94a3b8',
-          },
-        }}
-        onlyRenderVisibleElements={true}
-        translateExtent={[[-1000, -1000], [2000, 2000]]}
-        minZoom={0.1}
-        maxZoom={2}
-      >
-        <Background color={theme === 'dark' ? "#1e293b" : "#f1f5f9"} gap={20} variant={BackgroundVariant.Lines} />
-        <Controls className={cn(
-          "border-none shadow-xl",
-          theme === 'dark' ? "bg-slate-900" : "bg-white"
-        )} />
-        <MiniMap 
-          nodeColor="#3b82f6" 
-          maskColor={theme === 'dark' ? "rgba(15, 17, 21, 0.7)" : "rgba(255, 255, 255, 0.7)"}
-          className={cn(
-            "border rounded-lg shadow-2xl",
-            theme === 'dark' ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"
-          )}
-        />
-      </ReactFlow>
-    </div>
-  ), [nodes, edges, onNodesChange, onEdgesChange, onConnect, theme, showCode]);
+  // Sync structural element list from canvas (fires only on add/remove, not drag)
+  const handleStructureChange = useCallback((els: SimpleElement[]) => {
+    setElements(els);
+  }, []);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans overflow-hidden transition-colors duration-200" onMouseMove={handleMouseMove}>
-      <Header 
-        project={project} 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        theme={theme} 
-        toggleTheme={toggleTheme} 
+    <div className="flex flex-col h-screen w-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans overflow-hidden transition-colors duration-200">
+      <Header
+        project={project}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        theme={theme}
+        toggleTheme={toggleTheme}
       />
 
       <main className="flex flex-1 overflow-hidden relative">
         <ActivityBar activeTab={activeTab} setActiveTab={setActiveTab} />
-        
+
         <AnimatePresence initial={false}>
           {leftPanelVisible && (
-            <SidebarLeft 
-              visible={leftPanelVisible} 
+            <SidebarLeft
+              visible={leftPanelVisible}
               activeTab={activeTab}
               onAddElement={addNewElement}
               onDropElement={handleDropElement}
-              nodes={nodes}
+              nodes={elements}
               domainModel={domainModel}
             />
           )}
         </AnimatePresence>
 
         <section className="flex-1 flex flex-col bg-[var(--bg-canvas)] relative transition-colors duration-200">
-          <Toolbar 
+          <Toolbar
             leftPanelVisible={leftPanelVisible}
             setLeftPanelVisible={setLeftPanelVisible}
             rightPanelVisible={rightPanelVisible}
@@ -222,14 +115,18 @@ function WorkbenchContent() {
             setShowCode={setShowCode}
           />
 
-          <div className="flex-1 relative group/canvas flex overflow-hidden">
+          <div className="flex-1 relative flex overflow-hidden">
             {activeTab === 'modeling' ? (
               <>
-                {flowCanvas}
+                {/* Canvas owns all ReactFlow state — no re-render on node drag */}
+                <div className={`relative transition-all duration-300 ${showCode ? 'w-1/2' : 'w-full'}`}>
+                  <DiagramCanvas ref={canvasRef} onStructureChange={handleStructureChange} />
+                </div>
+
                 {showCode && (
-                  <KerMLEditor 
-                    kermlCode={kermlCode}
-                    setKermlCode={setKermlCode}
+                  <SysMLEditorPanel
+                    code={kermlCode}
+                    setCode={setKermlCode}
                     onDocumentSymbols={handleDocumentSymbols}
                   />
                 )}
@@ -249,7 +146,7 @@ function WorkbenchContent() {
             )}
           </div>
 
-          <StatusBar mousePos={mousePos} zoom={zoom} />
+          <StatusBar />
         </section>
 
         <AnimatePresence initial={false}>

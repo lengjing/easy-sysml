@@ -3,7 +3,7 @@ import {
   sysmlMonarchTokens,
   sysmlLanguageConfiguration,
   SYSML_LANGUAGE_ID,
-} from '../editor/sysml-language';
+} from '../components/editor/sysml-language';
 
 describe('sysml-language', () => {
   it('exports a language ID', () => {

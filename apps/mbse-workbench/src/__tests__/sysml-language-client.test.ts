@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SysMLLanguageClient } from '../editor/sysml-language-client';
+import { SysMLLanguageClient } from '../components/editor/sysml-language-client';
 
 describe('SysMLLanguageClient', () => {
   describe('static helpers', () => {

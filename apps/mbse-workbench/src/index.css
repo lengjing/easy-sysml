@@ -43,7 +43,7 @@
 
 /* React Flow Customizations */
 .react-flow__node {
-  @apply bg-[var(--bg-input)] text-[var(--text-main)] rounded-md px-4 py-2 text-xs font-medium transition-all
+  @apply bg-[var(--bg-input)] text-[var(--text-main)] rounded-md px-4 py-2 text-xs font-medium
   !p-0 !border-none !bg-transparent !shadow-none;
 }
 
