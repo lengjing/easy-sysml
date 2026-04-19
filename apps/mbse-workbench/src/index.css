@@ -67,6 +67,10 @@
   @apply stroke-blue-500;
 }
 
+.react-flow__controls {
+  @apply !bg-[var(--bg-sidebar)] !border-[var(--border-color)] !shadow-sm;
+}
+
 .react-flow__controls-button {
   @apply bg-[var(--bg-sidebar)] border-[var(--border-color)] fill-[var(--text-muted)] hover:bg-[var(--border-color)] transition-colors;
 }
