@@ -33,6 +33,9 @@ export interface SysMLEditorProps {
 /** Document URI used for LSP communication. */
 const DOC_URI = 'inmemory:///model.sysml';
 
+/** Normalize a URI to ensure triple-slash authority (Langium may collapse it). */
+const normalizeUri = (u: string) => u.replace(/^(\w+:)\/*/, '$1///');
+
 /** Shared LSP client singleton. */
 let _client: SysMLLanguageClient | undefined;
 /** Whether Monaco providers have been registered. */
@@ -287,7 +290,7 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
       // Register for diagnostics
       client.onDiagnostics((uri, markers) => {
         const model = editor.getModel();
-        if (model && uri === DOC_URI) {
+        if (model && normalizeUri(uri) === normalizeUri(DOC_URI)) {
           monaco.editor.setModelMarkers(model, 'sysml-lsp', markers);
         }
       });

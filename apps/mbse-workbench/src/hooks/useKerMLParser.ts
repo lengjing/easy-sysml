@@ -1,77 +1,122 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Node, Edge } from 'reactflow';
+import { parseSysMLToDomainModel, type DomainModel, type DomainElement } from '../editor/sysml-ast-parser';
 
 export function useKerMLParser(kermlCode: string, showCode: boolean) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [domainModel, setDomainModel] = useState<DomainModel | null>(null);
 
   const parseCode = useCallback(() => {
-    if (!showCode) return;
+    if (!showCode || !kermlCode.trim()) return;
 
     try {
-      const newNodes: Node[] = [];
-      const newEdges: Edge[] = [];
-      
-      const elementRegex = /(block|package|requirement|behavior|action|state|constraint|interface)\s+(\w+)\s*\{([^}]*)\}/gi;
-      let match;
-      let x = 100;
-      while ((match = elementRegex.exec(kermlCode)) !== null) {
-        const type = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
-        const name = match[2];
-        const content = match[3];
-        
-        const descMatch = /description\s*=\s*"([^"]*)"/.exec(content);
-        const statusMatch = /status\s*=\s*"([^"]*)"/.exec(content);
-        const attrMatches = [...content.matchAll(/attribute\s+(\w+)\s*=\s*"([^"]*)"/g)];
-        
-        const properties: any = {};
-        attrMatches.forEach(m => {
-          properties[m[1]] = m[2];
-        });
+      const model = parseSysMLToDomainModel(kermlCode);
+      setDomainModel(model);
 
-        newNodes.push({
-          id: name,
-          type: 'kerml',
-          position: { x, y: 150 },
-          data: {
-            label: name.replace(/_/g, ' '),
-            type: type,
-            description: descMatch ? descMatch[1] : '',
-            status: statusMatch ? statusMatch[1] : 'Draft',
-            properties
-          }
-        });
-        x += 250;
+      if (model.errors.length > 0) {
+        setParseError(model.errors.map(e => `L${e.line}:${e.column} ${e.message}`).join('\n'));
+      } else {
+        setParseError(null);
       }
 
-      const connRegex = /(\w+)\s*->\s*(\w+)/g;
-      while ((match = connRegex.exec(kermlCode)) !== null) {
+      // Convert domain elements to ReactFlow nodes
+      const newNodes: Node[] = [];
+      const newEdges: Edge[] = [];
+
+      function flattenElements(elements: DomainElement[], parentX: number) {
+        for (const el of elements) {
+          newNodes.push({
+            id: el.id,
+            type: 'kerml',
+            position: { x: parentX, y: 100 + newNodes.length * 180 },
+            data: {
+              label: el.name,
+              type: mapTypeForDisplay(el.type),
+              description: el.description,
+              status: 'Draft',
+              properties: el.properties,
+            },
+          });
+
+          // Add edges for parent-child relationships
+          if (el.children.length > 0) {
+            const nonAttrChildren = el.children.filter(
+              c => c.type !== 'Attribute' && c.type !== 'AttributeUsage',
+            );
+            for (const child of nonAttrChildren) {
+              newEdges.push({
+                id: `e-${el.id}-${child.id}`,
+                source: el.id,
+                target: child.id,
+                type: 'smoothstep',
+                animated: true,
+              });
+            }
+            flattenElements(nonAttrChildren, parentX + 250);
+          }
+
+          parentX += 250;
+        }
+      }
+
+      flattenElements(model.elements, 100);
+
+      // Add domain-level edges
+      for (const edge of model.edges) {
         newEdges.push({
-          id: `e-${match[1]}-${match[2]}`,
-          source: match[1],
-          target: match[2],
+          id: `e-${edge.sourceId}-${edge.targetId}`,
+          source: edge.sourceId,
+          target: edge.targetId,
           type: 'smoothstep',
-          animated: true
+          animated: true,
         });
       }
 
       if (newNodes.length > 0) {
         setNodes(newNodes);
         setEdges(newEdges);
-        setParseError(null);
       }
     } catch (e) {
-      setParseError(e instanceof Error ? e.message : "Parsing failed");
+      setParseError(e instanceof Error ? e.message : 'Parsing failed');
     }
   }, [kermlCode, showCode]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      parseCode();
-    }, 300); // Debounce parsing
+    const timer = setTimeout(() => parseCode(), 300);
     return () => clearTimeout(timer);
   }, [parseCode]);
 
-  return { nodes, edges, parseError, setNodes, setEdges };
+  return { nodes, edges, parseError, setNodes, setEdges, domainModel };
+}
+
+function mapTypeForDisplay(type: string): string {
+  switch (type) {
+    case 'PartDefinition': return 'Block';
+    case 'PartUsage':
+    case 'Part': return 'Part';
+    case 'AttributeDefinition': return 'Attribute';
+    case 'AttributeUsage':
+    case 'Attribute': return 'Attribute';
+    case 'PortDefinition':
+    case 'Port':
+    case 'PortUsage': return 'Port';
+    case 'ActionDefinition':
+    case 'Action':
+    case 'ActionUsage': return 'Action';
+    case 'StateDefinition':
+    case 'State':
+    case 'StateUsage': return 'State';
+    case 'RequirementDefinition':
+    case 'Requirement':
+    case 'RequirementUsage': return 'Requirement';
+    case 'ConstraintDefinition':
+    case 'Constraint':
+    case 'ConstraintUsage': return 'Constraint';
+    case 'ConnectionDefinition': return 'Interface';
+    case 'InterfaceDefinition': return 'Interface';
+    case 'Package': return 'Package';
+    default: return type;
+  }
 }

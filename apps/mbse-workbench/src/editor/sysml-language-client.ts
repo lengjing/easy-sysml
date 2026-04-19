@@ -26,7 +26,6 @@ import {
   CompletionItemKind,
   SymbolKind,
   DiagnosticSeverity,
-  TextDocumentSyncKind,
   type ProtocolConnection,
   type Hover,
   type CompletionItem,
@@ -66,6 +65,10 @@ export class SysMLLanguageClient {
       { type: 'module' },
     );
 
+    this.worker.onerror = (e) => {
+      console.error('[SysMLLanguageClient] Worker error:', e.message);
+    };
+
     const reader = new BrowserMessageReader(this.worker);
     const writer = new BrowserMessageWriter(this.worker);
     this.connection = createProtocolConnection(reader, writer);
@@ -74,6 +77,11 @@ export class SysMLLanguageClient {
     this.connection.onNotification(
       PublishDiagnosticsNotification.type,
       (params) => {
+        // Skip diagnostics for stdlib documents — linking errors in stdlib
+        // files are expected and non-actionable for the user.
+        if (params.uri.includes('/stdlib/')) {
+          return;
+        }
         if (this.diagnosticCallback && this.monacoInstance) {
           const markers = params.diagnostics.map((d) =>
             this.toMonacoMarker(d),
@@ -247,6 +255,7 @@ export class SysMLLanguageClient {
       startColumn: d.range.start.character + 1,
       endLineNumber: d.range.end.line + 1,
       endColumn: d.range.end.character + 1,
+      source: 'sysml',
     };
   }
 

@@ -29,6 +29,7 @@ import { StatusBar } from './components/StatusBar';
 import { KerMLEditor } from './components/KerMLEditor';
 import { TraceabilityMatrix } from './components/TraceabilityMatrix';
 import { useKerMLParser } from './hooks/useKerMLParser';
+import { applyElementRename, findElementById } from './editor/sysml-ast-parser';
 
 const nodeTypes = {
   kerml: KerMLNode
@@ -45,15 +46,14 @@ function WorkbenchContent() {
   const [showCode, setShowCode] = useState(false);
 
   const [kermlCode, setKermlCode] = useState(`package UAV_System {
-    block Control_Subsystem {
-        description = "Executes complex flight control algorithms.";
-        attribute frequency = "100Hz";
+    part def Control_Subsystem {
+        doc /* Executes complex flight control algorithms. */
+        attribute frequency : String;
     }
-    block Power_Subsystem {
-        description = "Provides regulated power to all avionics.";
-        attribute voltage = "24V";
+    part def Power_Subsystem {
+        doc /* Provides regulated power to all avionics. */
+        attribute voltage : String;
     }
-    Control_Subsystem -> Power_Subsystem;
 }`);
 
   useEffect(() => {
@@ -69,7 +69,7 @@ function WorkbenchContent() {
   const [nodes, setNodes, onNodesChange] = useNodesState(project.diagrams[0].nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(project.diagrams[0].edges);
 
-  const { nodes: parsedNodes, edges: parsedEdges, parseError } = useKerMLParser(kermlCode, showCode);
+  const { nodes: parsedNodes, edges: parsedEdges, parseError, domainModel } = useKerMLParser(kermlCode, showCode);
 
   useEffect(() => {
     if (showCode && parsedNodes.length > 0) {
@@ -84,32 +84,18 @@ function WorkbenchContent() {
   );
 
   const syncCodeFromCanvas = useCallback(() => {
-    let code = "package UAV_System {\n";
-    nodes.forEach(node => {
-      const name = node.data.label.replace(/\s+/g, '_');
-      const type = (node.data.type || 'block').toLowerCase();
-      code += `    ${type} ${name} {\n`;
-      if (node.data.description) {
-        code += `        description = "${node.data.description}";\n`;
+    if (!domainModel) return;
+    let code = kermlCode;
+    for (const node of nodes) {
+      const el = findElementById(domainModel.elements, node.id);
+      if (el && el.name !== node.data.label.replace(/\s+/g, '_')) {
+        code = applyElementRename(code, el.id, node.data.label.replace(/\s+/g, '_'), domainModel);
       }
-      if (node.data.status) {
-        code += `        status = "${node.data.status}";\n`;
-      }
-      if (node.data.properties) {
-        Object.entries(node.data.properties).forEach(([key, val]) => {
-          code += `        attribute ${key} = "${val}";\n`;
-        });
-      }
-      code += "    }\n";
-    });
-    edges.forEach(edge => {
-      const source = nodes.find(n => n.id === edge.source)?.data.label.replace(/\s+/g, '_') || edge.source;
-      const target = nodes.find(n => n.id === edge.target)?.data.label.replace(/\s+/g, '_') || edge.target;
-      code += `    ${source} -> ${target};\n`;
-    });
-    code += "}";
-    setKermlCode(code);
-  }, [nodes, edges]);
+    }
+    if (code !== kermlCode) {
+      setKermlCode(code);
+    }
+  }, [nodes, domainModel, kermlCode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     setMousePos({ x: Math.round(e.clientX), y: Math.round(e.clientY) });
