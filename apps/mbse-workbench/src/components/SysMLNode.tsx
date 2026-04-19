@@ -180,9 +180,9 @@ export const SysMLNode = memo(({ data, selected }: NodeProps) => {
 
   return (
     <div className={cn(
-      'flex flex-col bg-[var(--bg-input)] border-2 shadow-md min-w-[240px] max-w-[360px] transition-all overflow-hidden group',
+      'flex flex-col bg-[var(--bg-input)] border-1 shadow-md min-w-[240px] max-w-[360px] transition-all overflow-hidden group',
       palette.border,
-      selected ? 'ring-2 ring-blue-500 border-blue-500 z-50 shadow-blue-500/20' : 'hover:shadow-lg',
+      selected ? 'ring-1 ring-blue-500 border-blue-500 z-50 shadow-blue-500/20' : 'hover:shadow-lg',
     )}>
       <Handle type="target" position={Position.Top} className="w-2.5 h-2.5 !bg-blue-500 !border-2 !border-white dark:!border-slate-900 !-top-1.5" />
       <Handle type="target" position={Position.Left} id="left" className="w-2.5 h-2.5 !bg-teal-500 !border-2 !border-white dark:!border-slate-900 !-left-1.5" />
@@ -224,12 +224,12 @@ export const SysMLNode = memo(({ data, selected }: NodeProps) => {
             {Object.entries(properties).map(([key, val]) => (
               <div key={key} className="flex items-center gap-1.5 text-[10px] font-mono">
                 <span className="text-[var(--text-muted)] truncate">{key}</span>
-                {val && (
+                {val ? (
                   <>
                     <span className="text-[var(--text-muted)]">:</span>
                     <span className="text-[var(--text-main)] font-semibold bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700 truncate max-w-[140px]">{String(val)}</span>
                   </>
-                )}
+                ): null}
               </div>
             ))}
           </div>
