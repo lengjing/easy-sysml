@@ -303,7 +303,12 @@ export const SidebarLeft = ({
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
 
-/** Recursively collect top-level elements matching a given category. */
+/**
+ * Recursively collect top-level elements matching a given category.
+ * When an element matches, it is included with its full subtree
+ * (rendered by DomainTreeItems). We only recurse into non-matching
+ * elements to "unwrap" containers like packages.
+ */
 function collectByCategory(elements: DomainElement[], category: string): DomainElement[] {
   const result: DomainElement[] = [];
   for (const el of elements) {

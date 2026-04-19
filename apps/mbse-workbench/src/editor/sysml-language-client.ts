@@ -259,8 +259,9 @@ export class SysMLLanguageClient {
         );
         this.documentSymbolCallback(uri, symbols);
       }
-    } catch {
-      // Silently ignore — symbols are best-effort
+    } catch (e) {
+      // Symbols are best-effort; log at debug level for troubleshooting
+      console.debug('[SysMLLanguageClient] documentSymbols failed:', e);
     }
   }
 
