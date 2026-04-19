@@ -162,7 +162,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           const sysMsg: ChatMessage = {
             id: makeId(),
             role: 'system',
-            content: `\u{1F4CE} 已附加当前编辑器代码 (${currentCode.split('\n').length} 行) 作为上下文`,
+            content: `📎 已附加当前编辑器代码 (${currentCode.split('\n').length} 行) 作为上下文`,
             codeBlocks: [],
             thinkingSteps: [],
             timestamp: Date.now(),
@@ -172,7 +172,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           const sysMsg: ChatMessage = {
             id: makeId(),
             role: 'system',
-            content: '\u26A0\uFE0F 编辑器中没有代码，请先在编辑器中编写 SysML v2 代码',
+            content: '⚠️ 编辑器中没有代码，请先在编辑器中编写 SysML v2 代码',
             codeBlocks: [],
             thinkingSteps: [],
             timestamp: Date.now(),
@@ -187,7 +187,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         const sysMsg: ChatMessage = {
           id: makeId(),
           role: 'system',
-          content: `\u{1F4CB} 可用命令:\n${helpText}`,
+          content: `📋 可用命令:\n${helpText}`,
           codeBlocks: [],
           thinkingSteps: [],
           timestamp: Date.now(),
