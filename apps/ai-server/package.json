@@ -1,0 +1,30 @@
+{
+  "name": "@easy-sysml/ai-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Agent Server for SysML v2 modeling assistance with tool calling and grammar validation",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc --build",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@easy-sysml/language-server": "workspace:*",
+    "@easy-sysml/grammar": "workspace:*",
+    "@google/genai": "^1.29.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "langium": "~4.2.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.3"
+  }
+}

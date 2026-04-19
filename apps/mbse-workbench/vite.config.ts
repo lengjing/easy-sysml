@@ -7,24 +7,15 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.DEEPSEEK_API_KEY': JSON.stringify(env.DEEPSEEK_API_KEY),
-      'process.env.QWEN_API_KEY': JSON.stringify(env.QWEN_API_KEY),
-      'process.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY),
-      'process.env.AI_PROVIDER': JSON.stringify(env.AI_PROVIDER),
-      'process.env.AI_MODEL': JSON.stringify(env.AI_MODEL),
-      'process.env.AI_BASE_URL': JSON.stringify(env.AI_BASE_URL),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
+        // Forward /api requests to the separate AI agent server
         '/api': {
           target: `http://localhost:${env.AI_SERVER_PORT || '3001'}`,
           changeOrigin: true,
