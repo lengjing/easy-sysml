@@ -26,7 +26,6 @@ import {
   CompletionItemKind,
   SymbolKind,
   DiagnosticSeverity,
-  TextDocumentSyncKind,
   type ProtocolConnection,
   type Hover,
   type CompletionItem,
@@ -47,6 +46,10 @@ interface DiagnosticCallback {
   (uri: string, diagnostics: Monaco.editor.IMarkerData[]): void;
 }
 
+interface DocumentSymbolCallback {
+  (uri: string, symbols: DocumentSymbol[]): void;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Client                                                            */
 /* ------------------------------------------------------------------ */
@@ -58,6 +61,7 @@ export class SysMLLanguageClient {
   private initPromise: Promise<void> | undefined;
   private versionMap = new Map<string, number>();
   private diagnosticCallback?: DiagnosticCallback;
+  private documentSymbolCallback?: DocumentSymbolCallback;
   private monacoInstance?: typeof Monaco;
 
   constructor() {
@@ -65,6 +69,10 @@ export class SysMLLanguageClient {
       new URL('./sysml-server-worker.ts', import.meta.url),
       { type: 'module' },
     );
+
+    this.worker.onerror = (e) => {
+      console.error('[SysMLLanguageClient] Worker error:', e.message);
+    };
 
     const reader = new BrowserMessageReader(this.worker);
     const writer = new BrowserMessageWriter(this.worker);
@@ -74,11 +82,21 @@ export class SysMLLanguageClient {
     this.connection.onNotification(
       PublishDiagnosticsNotification.type,
       (params) => {
+        // Skip diagnostics for stdlib documents — linking errors in stdlib
+        // files are expected and non-actionable for the user.
+        if (params.uri.includes('/stdlib/')) {
+          return;
+        }
         if (this.diagnosticCallback && this.monacoInstance) {
           const markers = params.diagnostics.map((d) =>
             this.toMonacoMarker(d),
           );
           this.diagnosticCallback(params.uri, markers);
+        }
+        // When diagnostics arrive the server has finished processing;
+        // request fresh document symbols so the model view stays in sync.
+        if (this.documentSymbolCallback) {
+          this.requestDocumentSymbols(params.uri);
         }
       },
     );
@@ -94,6 +112,11 @@ export class SysMLLanguageClient {
   /** Register a callback for diagnostics pushed by the server. */
   onDiagnostics(callback: DiagnosticCallback): void {
     this.diagnosticCallback = callback;
+  }
+
+  /** Register a callback for document symbols. */
+  onDocumentSymbols(callback: DocumentSymbolCallback): void {
+    this.documentSymbolCallback = callback;
   }
 
   /** Initialize the language server (idempotent). */
@@ -222,6 +245,26 @@ export class SysMLLanguageClient {
     });
   }
 
+  /**
+   * Internal: request document symbols and push to callback.
+   * Called automatically after diagnostics arrive.
+   */
+  private async requestDocumentSymbols(uri: string): Promise<void> {
+    try {
+      const result = await this.documentSymbols(uri);
+      if (result && this.documentSymbolCallback) {
+        // Filter to DocumentSymbol (hierarchical) — ignore flat SymbolInformation
+        const symbols = result.filter(
+          (s): s is DocumentSymbol => 'range' in s && 'selectionRange' in s,
+        );
+        this.documentSymbolCallback(uri, symbols);
+      }
+    } catch (e) {
+      // Symbols are best-effort; log at debug level for troubleshooting
+      console.debug('[SysMLLanguageClient] documentSymbols failed:', e);
+    }
+  }
+
   /** Dispose the client and terminate the worker. */
   dispose(): void {
     this.connection.dispose();
@@ -247,6 +290,7 @@ export class SysMLLanguageClient {
       startColumn: d.range.start.character + 1,
       endLineNumber: d.range.end.line + 1,
       endColumn: d.range.end.character + 1,
+      source: 'sysml',
     };
   }
 

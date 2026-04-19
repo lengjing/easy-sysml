@@ -20,37 +20,45 @@ export const initialProject: Project = {
           position: { x: 250, y: 50 }, 
           data: { 
             label: 'UAV System', 
-            type: 'Package', 
-            description: 'Main system package containing all subsystems and global constraints.',
+            type: 'Package',
+            kind: 'Package',
+            detail: 'package',
+            category: 'package',
             properties: { version: '1.0.0' },
             status: 'Verified',
-            children: [{}, {}]
+            childCount: 2,
           }, 
-          type: 'kerml' 
+          type: 'sysml' 
         },
         { 
           id: '2', 
-          position: { x: 100, y: 200 }, 
+          position: { x: 100, y: 250 }, 
           data: { 
             label: 'Power Subsystem', 
-            type: 'Block', 
-            description: 'Manages energy storage and distribution to all electronic components.',
+            type: 'Block',
+            kind: 'PartDefinition',
+            detail: 'part def',
+            category: 'definition',
             properties: { voltage: '24V', capacity: '5000mAh' },
-            status: 'Review'
+            status: 'Review',
+            childCount: 0,
           }, 
-          type: 'kerml' 
+          type: 'sysml' 
         },
         { 
           id: '3', 
-          position: { x: 400, y: 200 }, 
+          position: { x: 450, y: 250 }, 
           data: { 
             label: 'Control Subsystem', 
-            type: 'Behavior', 
-            description: 'Executes complex flight control algorithms and autonomous navigation logic.',
+            type: 'Block',
+            kind: 'PartDefinition',
+            detail: 'part def',
+            category: 'definition',
             properties: { frequency: '100Hz', latency: '<5ms' },
-            status: 'Draft'
+            status: 'Draft',
+            childCount: 0,
           }, 
-          type: 'kerml' 
+          type: 'sysml' 
         },
       ],
       edges: [

@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Search, Settings, Box, FileText, Info, Layers, Table as TableIcon, Zap, Network, Activity, Package, Circle, Link2, Database, Calculator, ShieldCheck } from 'lucide-react';
+import {
+  Search, Settings, Box, FileText, Info, Layers,
+  Table as TableIcon, Zap, Network, Activity, Package,
+  Circle, Link2, Database, ShieldCheck,
+  Component, ArrowRightCircle, ShieldAlert, Target,
+  Cpu, Eye, Inbox, CheckSquare,
+} from 'lucide-react';
 import { TreeItem } from './TreeItem';
 import { ContextMenu } from './ContextMenu';
+import type { DomainModel, DomainElement } from '../editor/sysml-domain-model';
 
 interface SidebarLeftProps {
   visible: boolean;
@@ -10,9 +17,107 @@ interface SidebarLeftProps {
   onAddElement?: (type: string) => void;
   onDropElement?: (draggedId: string, targetId: string) => void;
   nodes: any[];
+  domainModel?: DomainModel | null;
 }
 
-export const SidebarLeft = ({ visible, activeTab, onAddElement, onDropElement, nodes }: SidebarLeftProps) => {
+/* ------------------------------------------------------------------ */
+/*  Icon mapping for tree items                                       */
+/* ------------------------------------------------------------------ */
+
+function iconForKind(kind: string) {
+  switch (kind) {
+    case 'Package':               return Package;
+    case 'PartDefinition':        return Box;
+    case 'PartUsage':             return Component;
+    case 'AttributeDefinition':
+    case 'AttributeUsage':        return Settings;
+    case 'PortDefinition':
+    case 'PortUsage':             return Circle;
+    case 'InterfaceDefinition':
+    case 'InterfaceUsage':
+    case 'ConnectionDefinition':
+    case 'ConnectionUsage':       return Link2;
+    case 'ActionDefinition':
+    case 'ActionUsage':           return ArrowRightCircle;
+    case 'StateDefinition':
+    case 'StateUsage':            return Activity;
+    case 'CalculationDefinition':
+    case 'CalculationUsage':      return Cpu;
+    case 'ConstraintDefinition':
+    case 'ConstraintUsage':       return ShieldAlert;
+    case 'RequirementDefinition':
+    case 'RequirementUsage':      return FileText;
+    case 'ConcernDefinition':
+    case 'ConcernUsage':          return Info;
+    case 'CaseDefinition':
+    case 'UseCaseDefinition':     return Target;
+    case 'AnalysisCaseDefinition':return Activity;
+    case 'VerificationCaseDefinition': return ShieldCheck;
+    case 'ItemDefinition':
+    case 'ItemUsage':             return Inbox;
+    case 'EnumerationDefinition':
+    case 'EnumerationUsage':      return Database;
+    case 'ViewDefinition':
+    case 'ViewpointDefinition':   return Eye;
+    default:                      return Box;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Recursive tree renderer for domain model elements                 */
+/* ------------------------------------------------------------------ */
+
+function DomainTreeItems({
+  elements,
+  onContextMenu,
+  onDrop,
+}: {
+  elements: DomainElement[];
+  onContextMenu: (e: React.MouseEvent) => void;
+  onDrop: (draggedId: string, targetId: string) => void;
+}) {
+  return (
+    <>
+      {elements.map(el => {
+        const Icon = iconForKind(el.kind);
+        const isLeaf = el.children.length === 0;
+        return (
+          <TreeItem
+            key={el.id}
+            id={el.id}
+            label={el.name}
+            icon={Icon}
+            isLeaf={isLeaf}
+            isOpen={!isLeaf}
+            onContextMenu={onContextMenu}
+            onDrop={onDrop}
+          >
+            {!isLeaf && (
+              <DomainTreeItems
+                elements={el.children}
+                onContextMenu={onContextMenu}
+                onDrop={onDrop}
+              />
+            )}
+          </TreeItem>
+        );
+      })}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                         */
+/* ------------------------------------------------------------------ */
+
+export const SidebarLeft = ({
+  visible,
+  activeTab,
+  onAddElement,
+  onDropElement,
+  nodes,
+  domainModel,
+}: SidebarLeftProps) => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   if (!visible) return null;
@@ -27,6 +132,17 @@ export const SidebarLeft = ({ visible, activeTab, onAddElement, onDropElement, n
       onDropElement(draggedId, targetId);
     }
   };
+
+  /* -- Categorise elements from the domain model (LSP) -- */
+  const allElements = domainModel?.elements ?? [];
+
+  // Collect elements by category for the tree
+  const packages = collectByCategory(allElements, 'package');
+  const definitions = collectByCategory(allElements, 'definition');
+  const usages = collectByCategory(allElements, 'usage');
+  const requirements = collectByCategory(allElements, 'requirement');
+  const constraints = collectByCategory(allElements, 'constraint');
+  const behaviors = collectByCategory(allElements, 'behavior');
 
   const renderContent = () => {
     if (activeTab === 'search') {
@@ -56,66 +172,70 @@ export const SidebarLeft = ({ visible, activeTab, onAddElement, onDropElement, n
       );
     }
 
+    // Main model tree — uses LSP domain model when available
+    const hasDomainModel = allElements.length > 0;
+
     return (
       <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
         <div className="space-y-1">
           <TreeItem label="模型树 (Model Tree)" icon={Box} isOpen={true} onContextMenu={handleContextMenu}>
-            {/* Packages */}
+
+            {/* ── Packages ── */}
             <TreeItem id="package-root" label="包 (Packages)" icon={Package} isOpen={true} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-              {nodes.filter(n => n.data.type === 'Package' && !n.parentNode).map(n => (
-                <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Package} isLeaf={false} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-                   {nodes.filter(child => child.parentNode === n.id).map(child => (
-                     <TreeItem key={child.id} id={child.id} label={child.data.label} icon={child.data.type === 'Package' ? Package : Box} isLeaf={child.data.type !== 'Package'} onContextMenu={handleContextMenu} onDrop={handleDrop} />
-                   ))}
-                </TreeItem>
-              ))}
-            </TreeItem>
-
-            {/* Requirements */}
-            <TreeItem id="req-root" label="需求与约束 (Req & Constraints)" icon={FileText} isOpen={true} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-              {nodes.filter(n => (n.data.type === 'Requirement' || n.data.type === 'Constraint') && !n.parentNode).map(n => (
-                <TreeItem key={n.id} id={n.id} label={n.data.label} icon={n.data.type === 'Requirement' ? Info : ShieldCheck} isLeaf={false} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-                   {nodes.filter(child => child.parentNode === n.id).map(child => (
-                     <TreeItem key={child.id} id={child.id} label={child.data.label} icon={Info} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
-                   ))}
-                </TreeItem>
-              ))}
-              {/* Fallback */}
-              {nodes.filter(n => n.data.type === 'Requirement' || n.data.type === 'Constraint').length === 0 && (
-                <>
-                  <TreeItem label="R01-自主避障" icon={Info} isLeaf onContextMenu={handleContextMenu} />
-                  <TreeItem label="R02-续航能力" icon={Info} isLeaf onContextMenu={handleContextMenu} />
-                </>
+              {hasDomainModel ? (
+                <DomainTreeItems elements={packages} onContextMenu={handleContextMenu} onDrop={handleDrop} />
+              ) : (
+                nodes.filter(n => n.data.type === 'Package' && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Package} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                ))
               )}
             </TreeItem>
 
-            {/* Structure */}
+            {/* ── Definitions ── */}
+            <TreeItem id="def-root" label="定义 (Definitions)" icon={Layers} isOpen={true} onContextMenu={handleContextMenu} onDrop={handleDrop}>
+              {hasDomainModel ? (
+                <DomainTreeItems elements={definitions} onContextMenu={handleContextMenu} onDrop={handleDrop} />
+              ) : (
+                nodes.filter(n => ['Block', 'DataType'].includes(n.data.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Box} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                ))
+              )}
+            </TreeItem>
+
+            {/* ── Structure (Usages) ── */}
             <TreeItem id="struct-root" label="结构 (Structure)" icon={Layers} isOpen={true} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-              {nodes.filter(n => ['Part', 'Port', 'Interface', 'Item', 'Attribute'].includes(n.data.type) && !n.parentNode).map(n => (
-                <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Box} isLeaf={false} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-                   {nodes.filter(child => child.parentNode === n.id).map(child => (
-                     <TreeItem key={child.id} id={child.id} label={child.data.label} icon={Box} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
-                   ))}
-                </TreeItem>
-              ))}
-              {/* Fallback */}
-              {nodes.filter(n => ['Part', 'Port', 'Interface', 'Item', 'Attribute'].includes(n.data.type)).length === 0 && (
-                <>
-                  <TreeItem label="动力系统" icon={Box} isLeaf onContextMenu={handleContextMenu} />
-                  <TreeItem label="飞控中心" icon={Box} isLeaf onContextMenu={handleContextMenu} />
-                </>
+              {hasDomainModel ? (
+                <DomainTreeItems elements={usages} onContextMenu={handleContextMenu} onDrop={handleDrop} />
+              ) : (
+                nodes.filter(n => ['Part', 'Port', 'Interface', 'Item', 'Attribute'].includes(n.data.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Component} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                ))
               )}
             </TreeItem>
 
-            {/* Behavior */}
+            {/* ── Requirements & Constraints ── */}
+            <TreeItem id="req-root" label="需求与约束 (Requirements)" icon={FileText} isOpen={true} onContextMenu={handleContextMenu} onDrop={handleDrop}>
+              {hasDomainModel ? (
+                <>
+                  <DomainTreeItems elements={requirements} onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                  <DomainTreeItems elements={constraints} onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                </>
+              ) : (
+                nodes.filter(n => ['Requirement', 'Constraint'].includes(n.data.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={n.data.type === 'Requirement' ? Info : ShieldCheck} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                ))
+              )}
+            </TreeItem>
+
+            {/* ── Behavior ── */}
             <TreeItem id="behavior-root" label="行为 (Behavior)" icon={Zap} isOpen={true} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-              {nodes.filter(n => ['Action', 'State', 'Calculation'].includes(n.data.type) && !n.parentNode).map(n => (
-                <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Zap} isLeaf={false} onContextMenu={handleContextMenu} onDrop={handleDrop}>
-                   {nodes.filter(child => child.parentNode === n.id).map(child => (
-                     <TreeItem key={child.id} id={child.id} label={child.data.label} icon={Zap} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
-                   ))}
-                </TreeItem>
-              ))}
+              {hasDomainModel ? (
+                <DomainTreeItems elements={behaviors} onContextMenu={handleContextMenu} onDrop={handleDrop} />
+              ) : (
+                nodes.filter(n => ['Action', 'State', 'Calculation'].includes(n.data.type) && !n.parentNode).map(n => (
+                  <TreeItem key={n.id} id={n.id} label={n.data.label} icon={Zap} isLeaf onContextMenu={handleContextMenu} onDrop={handleDrop} />
+                ))
+              )}
             </TreeItem>
           </TreeItem>
 
@@ -178,3 +298,25 @@ export const SidebarLeft = ({ visible, activeTab, onAddElement, onDropElement, n
     </motion.aside>
   );
 };
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Recursively collect top-level elements matching a given category.
+ * When an element matches, it is included with its full subtree
+ * (rendered by DomainTreeItems). We only recurse into non-matching
+ * elements to "unwrap" containers like packages.
+ */
+function collectByCategory(elements: DomainElement[], category: string): DomainElement[] {
+  const result: DomainElement[] = [];
+  for (const el of elements) {
+    if (el.category === category) {
+      result.push(el);
+    } else {
+      result.push(...collectByCategory(el.children, category));
+    }
+  }
+  return result;
+}

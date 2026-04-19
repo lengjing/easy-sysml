@@ -26,12 +26,17 @@ export interface SysMLEditorProps {
   value: string;
   /** Called whenever the content changes. */
   onChange: (value: string) => void;
+  /** Called when document symbols are updated by the LSP. */
+  onDocumentSymbols?: (symbols: DocumentSymbol[]) => void;
   /** Optional CSS class for the container div. */
   className?: string;
 }
 
 /** Document URI used for LSP communication. */
 const DOC_URI = 'inmemory:///model.sysml';
+
+/** Normalize a URI to ensure triple-slash authority (Langium may collapse it). */
+const normalizeUri = (u: string) => u.replace(/^(\w+:)\/*/, '$1///');
 
 /** Shared LSP client singleton. */
 let _client: SysMLLanguageClient | undefined;
@@ -259,11 +264,14 @@ function registerLSPProviders(monaco: typeof Monaco): void {
 export const SysMLEditor: React.FC<SysMLEditorProps> = ({
   value,
   onChange,
+  onDocumentSymbols,
   className,
 }) => {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const docOpenRef = useRef(false);
+  const onDocumentSymbolsRef = useRef(onDocumentSymbols);
+  onDocumentSymbolsRef.current = onDocumentSymbols;
 
   /** Register the SysML language before Monaco mounts. */
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
@@ -287,8 +295,15 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
       // Register for diagnostics
       client.onDiagnostics((uri, markers) => {
         const model = editor.getModel();
-        if (model && uri === DOC_URI) {
+        if (model && normalizeUri(uri) === normalizeUri(DOC_URI)) {
           monaco.editor.setModelMarkers(model, 'sysml-lsp', markers);
+        }
+      });
+
+      // Register for document symbols — forward to parent
+      client.onDocumentSymbols((uri, symbols) => {
+        if (normalizeUri(uri) === normalizeUri(DOC_URI)) {
+          onDocumentSymbolsRef.current?.(symbols);
         }
       });
 
