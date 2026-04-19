@@ -3,6 +3,7 @@ import { ReactFlowProvider } from 'reactflow';
 import { AnimatePresence } from 'motion/react';
 import { Box } from 'lucide-react';
 
+import { cn } from './lib/utils';
 import { Project } from './types';
 import { initialProject } from './data/initialProject';
 import { DiagramCanvas, DiagramCanvasHandle, SimpleElement } from './components/DiagramCanvas';
@@ -14,6 +15,7 @@ import { Toolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
 import { SysMLEditorPanel } from './components/SysMLEditorPanel';
 import { TraceabilityMatrix } from './components/TraceabilityMatrix';
+import { AIChatPanel } from './components/ai/AIChatPanel';
 import { useSysMLParser } from './hooks/useSysMLParser';
 
 function WorkbenchContent() {
@@ -23,6 +25,7 @@ function WorkbenchContent() {
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const [showCode, setShowCode] = useState(false);
+  const [showAI, setShowAI] = useState(false);
 
   // Structural element list for sidebar (no positions — only updated on add/remove)
   const [elements, setElements] = useState<SimpleElement[]>(() =>
@@ -65,7 +68,11 @@ function WorkbenchContent() {
     }
   }, [parsedNodes, parsedEdges, showCode]);
 
-  // Stable callbacks for sidebar actions — call into canvas via ref
+  // Callback for AI "Apply" button — replaces editor code and opens editor
+  const handleApplyAICode = useCallback((code: string) => {
+    setKermlCode(code);
+    setShowCode(true);
+  }, []);
   const addNewElement = useCallback((type: string = 'Block') => {
     canvasRef.current?.addNode(type);
   }, []);
@@ -113,22 +120,37 @@ function WorkbenchContent() {
             setRightPanelVisible={setRightPanelVisible}
             showCode={showCode}
             setShowCode={setShowCode}
+            showAI={showAI}
+            setShowAI={setShowAI}
           />
 
           <div className="flex-1 relative flex overflow-hidden">
             {activeTab === 'modeling' ? (
               <>
-                {/* Canvas owns all ReactFlow state — no re-render on node drag */}
-                <div className={`relative transition-all duration-300 ${showCode ? 'w-1/2' : 'w-full'}`}>
+                {/* Canvas — takes remaining space */}
+                <div className={cn(
+                  'relative transition-all duration-300',
+                  showCode && showAI ? 'w-1/3' : showCode || showAI ? 'w-1/2' : 'w-full',
+                )}>
                   <DiagramCanvas ref={canvasRef} onStructureChange={handleStructureChange} />
                 </div>
 
-                {showCode && (
-                  <SysMLEditorPanel
-                    code={kermlCode}
-                    setCode={setKermlCode}
-                    onDocumentSymbols={handleDocumentSymbols}
-                  />
+                {/* Keep editor mounted to preserve undo/redo history */}
+                <SysMLEditorPanel
+                  code={kermlCode}
+                  setCode={setKermlCode}
+                  onDocumentSymbols={handleDocumentSymbols}
+                  visible={showCode}
+                />
+
+                {/* AI Chat Panel */}
+                {showAI && (
+                  <div className="w-[340px] border-l border-[var(--border-color)] flex-shrink-0">
+                    <AIChatPanel
+                      onApplyCode={handleApplyAICode}
+                      currentCode={kermlCode}
+                    />
+                  </div>
                 )}
               </>
             ) : activeTab === 'traceability' ? (

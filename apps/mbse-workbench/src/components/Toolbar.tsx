@@ -7,7 +7,8 @@ import {
   Download, 
   Play, 
   History, 
-  Layers 
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -18,6 +19,8 @@ interface ToolbarProps {
   setRightPanelVisible: (visible: boolean) => void;
   showCode: boolean;
   setShowCode: (show: boolean) => void;
+  showAI: boolean;
+  setShowAI: (show: boolean) => void;
 }
 
 export const Toolbar = ({
@@ -26,7 +29,9 @@ export const Toolbar = ({
   rightPanelVisible,
   setRightPanelVisible,
   showCode,
-  setShowCode
+  setShowCode,
+  showAI,
+  setShowAI,
 }: ToolbarProps) => {
   return (
     <div className="h-10 border-b border-[var(--border-color)] flex items-center justify-between px-4 bg-[var(--bg-sidebar)]/50 backdrop-blur-sm transition-colors duration-200">
@@ -57,6 +62,16 @@ export const Toolbar = ({
         >
           <Code size={14} />
           {showCode ? "隐藏代码" : "显示代码"}
+        </button>
+        <button 
+          onClick={() => setShowAI(!showAI)}
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium rounded transition-colors",
+            showAI ? "text-purple-500 bg-purple-500/10" : "text-[var(--text-main)] hover:bg-[var(--border-color)]"
+          )}
+        >
+          <Sparkles size={14} />
+          {showAI ? "隐藏 AI" : "AI 助手"}
         </button>
         <div className="h-4 w-px bg-[var(--border-color)]" />
         <div className="flex items-center gap-1">
