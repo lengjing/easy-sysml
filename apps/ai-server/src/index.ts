@@ -271,9 +271,8 @@ async function runAgent(ctx: AgentContext): Promise<void> {
 
           let fixResponse = '';
           try {
-            fixResponse = await streamChatResponse(fixMessages, (chunk: string) => {
-              // Don't stream fix attempts to client — just collect
-            });
+            // Collect fix response without streaming to client
+            fixResponse = await streamChatResponse(fixMessages, () => {});
           } catch {
             break;
           }

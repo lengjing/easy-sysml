@@ -341,10 +341,18 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     result: data.result,
                     timestamp: Date.now(),
                   };
-                  const existingIdx = toolCallAcc.findIndex(
-                    t => t.name === data.name && t.status === 'running',
-                  );
-                  if (existingIdx >= 0 && data.status !== 'running') {
+                  // Update the most recent 'running' entry for this tool,
+                  // or append if this is a new invocation
+                  let existingIdx = -1;
+                  if (data.status !== 'running') {
+                    for (let i = toolCallAcc.length - 1; i >= 0; i--) {
+                      if (toolCallAcc[i].name === data.name && toolCallAcc[i].status === 'running') {
+                        existingIdx = i;
+                        break;
+                      }
+                    }
+                  }
+                  if (existingIdx >= 0) {
                     toolCallAcc[existingIdx] = tc;
                   } else {
                     toolCallAcc.push(tc);
