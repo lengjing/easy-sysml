@@ -63,80 +63,174 @@ export interface DomainModel {
 /* ------------------------------------------------------------------ */
 
 /**
- * Map an LSP DocumentSymbol detail (the SysML keyword) and kind to a
- * human-readable SysML element kind label and category.
+ * Map an LSP DocumentSymbol to a SysML kind label and category.
  *
- * The LSP detail string is the primary source because the language server
- * sets it to the keyword (e.g. "part def", "requirement def", etc.).
- * The SymbolKind is used as fallback.
+ * Priority order:
+ *  1. Exact match on `detail` against the AST $type set by
+ *     SysMLDocumentSymbolProvider (e.g. "PartDefinition").
+ *  2. Keyword-style matching on `detail` for compatibility with
+ *     editors that format the detail as "part def", "requirement", etc.
+ *  3. Fallback by LSP SymbolKind.
  */
+
+/** Lookup table: AST $type → { kind, category }. */
+const AST_TYPE_MAP: Record<string, { kind: string; category: SysMLCategory }> = {
+  // Packages / namespaces
+  Package:                     { kind: 'Package', category: 'package' },
+  LibraryPackage:              { kind: 'Package', category: 'package' },
+  Namespace:                   { kind: 'Namespace', category: 'package' },
+
+  // Definitions
+  PartDefinition:              { kind: 'PartDefinition', category: 'definition' },
+  AttributeDefinition:         { kind: 'AttributeDefinition', category: 'definition' },
+  PortDefinition:              { kind: 'PortDefinition', category: 'definition' },
+  InterfaceDefinition:         { kind: 'InterfaceDefinition', category: 'definition' },
+  ConnectionDefinition:        { kind: 'ConnectionDefinition', category: 'definition' },
+  AllocationDefinition:        { kind: 'AllocationDefinition', category: 'definition' },
+  FlowConnectionDefinition:    { kind: 'FlowConnectionDefinition', category: 'definition' },
+  ItemDefinition:              { kind: 'ItemDefinition', category: 'definition' },
+  OccurrenceDefinition:        { kind: 'OccurrenceDefinition', category: 'definition' },
+  EnumerationDefinition:       { kind: 'EnumerationDefinition', category: 'definition' },
+  MetadataDefinition:          { kind: 'MetadataDefinition', category: 'definition' },
+  ViewDefinition:              { kind: 'ViewDefinition', category: 'definition' },
+  ViewpointDefinition:         { kind: 'ViewpointDefinition', category: 'definition' },
+  RenderingDefinition:         { kind: 'RenderingDefinition', category: 'definition' },
+  ActionDefinition:            { kind: 'ActionDefinition', category: 'behavior' },
+  StateDefinition:             { kind: 'StateDefinition', category: 'behavior' },
+  CalculationDefinition:       { kind: 'CalculationDefinition', category: 'behavior' },
+  ConstraintDefinition:        { kind: 'ConstraintDefinition', category: 'constraint' },
+  RequirementDefinition:       { kind: 'RequirementDefinition', category: 'requirement' },
+  ConcernDefinition:           { kind: 'ConcernDefinition', category: 'requirement' },
+  CaseDefinition:              { kind: 'CaseDefinition', category: 'behavior' },
+  AnalysisCaseDefinition:      { kind: 'AnalysisCaseDefinition', category: 'behavior' },
+  VerificationCaseDefinition:  { kind: 'VerificationCaseDefinition', category: 'behavior' },
+  UseCaseDefinition:           { kind: 'UseCaseDefinition', category: 'behavior' },
+
+  // Usages
+  PartUsage:                   { kind: 'PartUsage', category: 'usage' },
+  AttributeUsage:              { kind: 'AttributeUsage', category: 'usage' },
+  PortUsage:                   { kind: 'PortUsage', category: 'usage' },
+  InterfaceUsage:              { kind: 'InterfaceUsage', category: 'usage' },
+  ConnectionUsage:             { kind: 'ConnectionUsage', category: 'usage' },
+  AllocationUsage:             { kind: 'AllocationUsage', category: 'usage' },
+  ItemUsage:                   { kind: 'ItemUsage', category: 'usage' },
+  OccurrenceUsage:             { kind: 'OccurrenceUsage', category: 'usage' },
+  EnumerationUsage:            { kind: 'EnumerationUsage', category: 'usage' },
+  ReferenceUsage:              { kind: 'ReferenceUsage', category: 'usage' },
+  MetadataUsage:               { kind: 'MetadataUsage', category: 'usage' },
+  FlowUsage:                   { kind: 'FlowConnectionUsage', category: 'usage' },
+  SuccessionFlowUsage:         { kind: 'FlowConnectionUsage', category: 'usage' },
+  ViewUsage:                   { kind: 'ViewUsage', category: 'usage' },
+  ViewpointUsage:              { kind: 'ViewpointUsage', category: 'usage' },
+  RenderingUsage:              { kind: 'RenderingUsage', category: 'usage' },
+
+  // Behavioral usages
+  ActionUsage:                 { kind: 'ActionUsage', category: 'behavior' },
+  StateUsage:                  { kind: 'StateUsage', category: 'behavior' },
+  CalculationUsage:            { kind: 'CalculationUsage', category: 'behavior' },
+  ConstraintUsage:             { kind: 'ConstraintUsage', category: 'constraint' },
+  RequirementUsage:            { kind: 'RequirementUsage', category: 'requirement' },
+  ConcernUsage:                { kind: 'ConcernUsage', category: 'requirement' },
+  CaseUsage:                   { kind: 'CaseUsage', category: 'behavior' },
+  AnalysisCaseUsage:           { kind: 'AnalysisCaseUsage', category: 'behavior' },
+  VerificationCaseUsage:       { kind: 'VerificationCaseUsage', category: 'behavior' },
+  UseCaseUsage:                { kind: 'UseCaseUsage', category: 'behavior' },
+  ExhibitStateUsage:           { kind: 'ExhibitStateUsage', category: 'behavior' },
+  PerformActionUsage:          { kind: 'PerformActionUsage', category: 'behavior' },
+  AcceptActionUsage:           { kind: 'AcceptActionUsage', category: 'behavior' },
+  SendActionUsage:             { kind: 'SendActionUsage', category: 'behavior' },
+  AssignmentActionUsage:       { kind: 'AssignmentActionUsage', category: 'behavior' },
+  IfActionUsage:               { kind: 'IfActionUsage', category: 'behavior' },
+  WhileLoopActionUsage:        { kind: 'WhileLoopActionUsage', category: 'behavior' },
+  ForLoopActionUsage:          { kind: 'ForLoopActionUsage', category: 'behavior' },
+  TransitionUsage:             { kind: 'TransitionUsage', category: 'behavior' },
+  SatisfyRequirementUsage:     { kind: 'SatisfyRequirementUsage', category: 'relationship' },
+  AssertConstraintUsage:       { kind: 'AssertConstraintUsage', category: 'constraint' },
+  TerminateActionUsage:        { kind: 'TerminateActionUsage', category: 'behavior' },
+  IncludeUseCaseUsage:         { kind: 'IncludeUseCaseUsage', category: 'behavior' },
+  EventOccurrenceUsage:        { kind: 'EventOccurrenceUsage', category: 'behavior' },
+
+  // Relationships
+  BindingConnector:            { kind: 'BindingConnector', category: 'relationship' },
+  BindingConnectorAsUsage:     { kind: 'BindingConnector', category: 'relationship' },
+  Succession:                  { kind: 'Succession', category: 'relationship' },
+  SuccessionAsUsage:           { kind: 'Succession', category: 'relationship' },
+};
+
 function classifySymbol(sym: DocumentSymbol): { kind: string; category: SysMLCategory } {
-  const detail = (sym.detail ?? '').toLowerCase().trim();
+  const detail = (sym.detail ?? '').trim();
+
+  // 1. Exact match against AST $type (PascalCase from the language server)
+  if (detail && AST_TYPE_MAP[detail]) {
+    return AST_TYPE_MAP[detail];
+  }
+
+  // 2. Keyword-style matching (for compatibility / manual detail strings)
+  const lc = detail.toLowerCase();
 
   // Package
-  if (detail === 'package' || detail === 'library package') {
+  if (lc === 'package' || lc === 'library package') {
     return { kind: 'Package', category: 'package' };
   }
 
-  // Definitions (types)
-  if (detail.includes('part def'))        return { kind: 'PartDefinition', category: 'definition' };
-  if (detail.includes('attribute def'))   return { kind: 'AttributeDefinition', category: 'definition' };
-  if (detail.includes('port def'))        return { kind: 'PortDefinition', category: 'definition' };
-  if (detail.includes('interface def'))   return { kind: 'InterfaceDefinition', category: 'definition' };
-  if (detail.includes('flow connection def')) return { kind: 'FlowConnectionDefinition', category: 'definition' };
-  if (detail.includes('connection def'))  return { kind: 'ConnectionDefinition', category: 'definition' };
-  if (detail.includes('allocation def'))  return { kind: 'AllocationDefinition', category: 'definition' };
-  if (detail.includes('action def'))      return { kind: 'ActionDefinition', category: 'behavior' };
-  if (detail.includes('state def'))       return { kind: 'StateDefinition', category: 'behavior' };
-  if (detail.includes('calculation def')) return { kind: 'CalculationDefinition', category: 'behavior' };
-  if (detail.includes('constraint def'))  return { kind: 'ConstraintDefinition', category: 'constraint' };
-  if (detail.includes('requirement def')) return { kind: 'RequirementDefinition', category: 'requirement' };
-  if (detail.includes('concern def'))     return { kind: 'ConcernDefinition', category: 'requirement' };
-  if (detail.includes('analysis case def')) return { kind: 'AnalysisCaseDefinition', category: 'behavior' };
-  if (detail.includes('verification case def')) return { kind: 'VerificationCaseDefinition', category: 'behavior' };
-  if (detail.includes('use case def'))    return { kind: 'UseCaseDefinition', category: 'behavior' };
-  if (detail.includes('case def'))        return { kind: 'CaseDefinition', category: 'behavior' };
-  if (detail.includes('view def'))        return { kind: 'ViewDefinition', category: 'definition' };
-  if (detail.includes('viewpoint def'))   return { kind: 'ViewpointDefinition', category: 'definition' };
-  if (detail.includes('rendering def'))   return { kind: 'RenderingDefinition', category: 'definition' };
-  if (detail.includes('metadata def'))    return { kind: 'MetadataDefinition', category: 'definition' };
-  if (detail.includes('occurrence def'))  return { kind: 'OccurrenceDefinition', category: 'definition' };
-  if (detail.includes('item def'))        return { kind: 'ItemDefinition', category: 'definition' };
-  if (detail.includes('enum def'))        return { kind: 'EnumerationDefinition', category: 'definition' };
-  // flow connection def already handled above
+  // Definitions — compound keywords checked first (longest match first)
+  if (lc.includes('flow connection def')) return { kind: 'FlowConnectionDefinition', category: 'definition' };
+  if (lc.includes('verification case def')) return { kind: 'VerificationCaseDefinition', category: 'behavior' };
+  if (lc.includes('analysis case def')) return { kind: 'AnalysisCaseDefinition', category: 'behavior' };
+  if (lc.includes('use case def'))    return { kind: 'UseCaseDefinition', category: 'behavior' };
+  if (lc.includes('viewpoint def'))   return { kind: 'ViewpointDefinition', category: 'definition' };
+  if (lc.includes('rendering def'))   return { kind: 'RenderingDefinition', category: 'definition' };
+  if (lc.includes('metadata def'))    return { kind: 'MetadataDefinition', category: 'definition' };
+  if (lc.includes('occurrence def'))  return { kind: 'OccurrenceDefinition', category: 'definition' };
+  if (lc.includes('part def'))        return { kind: 'PartDefinition', category: 'definition' };
+  if (lc.includes('attribute def'))   return { kind: 'AttributeDefinition', category: 'definition' };
+  if (lc.includes('port def'))        return { kind: 'PortDefinition', category: 'definition' };
+  if (lc.includes('interface def'))   return { kind: 'InterfaceDefinition', category: 'definition' };
+  if (lc.includes('connection def'))  return { kind: 'ConnectionDefinition', category: 'definition' };
+  if (lc.includes('allocation def'))  return { kind: 'AllocationDefinition', category: 'definition' };
+  if (lc.includes('action def'))      return { kind: 'ActionDefinition', category: 'behavior' };
+  if (lc.includes('state def'))       return { kind: 'StateDefinition', category: 'behavior' };
+  if (lc.includes('calculation def')) return { kind: 'CalculationDefinition', category: 'behavior' };
+  if (lc.includes('constraint def'))  return { kind: 'ConstraintDefinition', category: 'constraint' };
+  if (lc.includes('requirement def')) return { kind: 'RequirementDefinition', category: 'requirement' };
+  if (lc.includes('concern def'))     return { kind: 'ConcernDefinition', category: 'requirement' };
+  if (lc.includes('case def'))        return { kind: 'CaseDefinition', category: 'behavior' };
+  if (lc.includes('view def'))        return { kind: 'ViewDefinition', category: 'definition' };
+  if (lc.includes('item def'))        return { kind: 'ItemDefinition', category: 'definition' };
+  if (lc.includes('enum def'))        return { kind: 'EnumerationDefinition', category: 'definition' };
 
-  // Usages
-  if (detail.includes('part'))            return { kind: 'PartUsage', category: 'usage' };
-  if (detail.includes('attribute'))       return { kind: 'AttributeUsage', category: 'usage' };
-  if (detail.includes('port'))            return { kind: 'PortUsage', category: 'usage' };
-  if (detail.includes('interface'))       return { kind: 'InterfaceUsage', category: 'usage' };
-  if (detail.includes('connection'))      return { kind: 'ConnectionUsage', category: 'usage' };
-  if (detail.includes('allocation'))      return { kind: 'AllocationUsage', category: 'usage' };
-  if (detail.includes('action'))          return { kind: 'ActionUsage', category: 'behavior' };
-  if (detail.includes('state'))           return { kind: 'StateUsage', category: 'behavior' };
-  if (detail.includes('calculation'))     return { kind: 'CalculationUsage', category: 'behavior' };
-  if (detail.includes('constraint'))      return { kind: 'ConstraintUsage', category: 'constraint' };
-  if (detail.includes('requirement'))     return { kind: 'RequirementUsage', category: 'requirement' };
-  if (detail.includes('concern'))         return { kind: 'ConcernUsage', category: 'requirement' };
-  if (detail.includes('item'))            return { kind: 'ItemUsage', category: 'usage' };
-  if (detail.includes('ref'))             return { kind: 'ReferenceUsage', category: 'usage' };
-  if (detail.includes('flow'))            return { kind: 'FlowConnectionUsage', category: 'usage' };
-  if (detail.includes('exhibit'))         return { kind: 'ExhibitStateUsage', category: 'behavior' };
-  if (detail.includes('perform'))         return { kind: 'PerformActionUsage', category: 'behavior' };
-  if (detail.includes('satisfy'))         return { kind: 'SatisfyRequirementUsage', category: 'relationship' };
-  if (detail.includes('assert'))          return { kind: 'AssertConstraintUsage', category: 'constraint' };
-  if (detail.includes('bind'))            return { kind: 'BindingConnector', category: 'relationship' };
-  if (detail.includes('succession'))      return { kind: 'Succession', category: 'relationship' };
-  if (detail.includes('transition'))      return { kind: 'TransitionUsage', category: 'behavior' };
-  if (detail.includes('send'))            return { kind: 'SendActionUsage', category: 'behavior' };
-  if (detail.includes('accept'))          return { kind: 'AcceptActionUsage', category: 'behavior' };
-  if (detail.includes('assign'))          return { kind: 'AssignmentActionUsage', category: 'behavior' };
-  if (detail.includes('if'))              return { kind: 'IfActionUsage', category: 'behavior' };
-  if (detail.includes('for'))             return { kind: 'ForLoopActionUsage', category: 'behavior' };
-  if (detail.includes('while'))           return { kind: 'WhileLoopActionUsage', category: 'behavior' };
-  if (detail.includes('enum'))            return { kind: 'EnumerationUsage', category: 'usage' };
+  // Usages — compound keywords first to prevent premature matches
+  if (lc.includes('exhibit'))         return { kind: 'ExhibitStateUsage', category: 'behavior' };
+  if (lc.includes('perform'))         return { kind: 'PerformActionUsage', category: 'behavior' };
+  if (lc.includes('satisfy'))         return { kind: 'SatisfyRequirementUsage', category: 'relationship' };
+  if (lc.includes('assert'))          return { kind: 'AssertConstraintUsage', category: 'constraint' };
+  if (lc.includes('send'))            return { kind: 'SendActionUsage', category: 'behavior' };
+  if (lc.includes('accept'))          return { kind: 'AcceptActionUsage', category: 'behavior' };
+  if (lc.includes('assign'))          return { kind: 'AssignmentActionUsage', category: 'behavior' };
+  if (lc.includes('transition'))      return { kind: 'TransitionUsage', category: 'behavior' };
+  if (lc.includes('succession'))      return { kind: 'Succession', category: 'relationship' };
+  if (lc.includes('bind'))            return { kind: 'BindingConnector', category: 'relationship' };
+  if (lc.includes('flow'))            return { kind: 'FlowConnectionUsage', category: 'usage' };
+  if (lc.includes('while'))           return { kind: 'WhileLoopActionUsage', category: 'behavior' };
+  if (lc.includes('for'))             return { kind: 'ForLoopActionUsage', category: 'behavior' };
+  if (lc.includes('if'))              return { kind: 'IfActionUsage', category: 'behavior' };
+  if (lc.includes('part'))            return { kind: 'PartUsage', category: 'usage' };
+  if (lc.includes('attribute'))       return { kind: 'AttributeUsage', category: 'usage' };
+  if (lc.includes('port'))            return { kind: 'PortUsage', category: 'usage' };
+  if (lc.includes('interface'))       return { kind: 'InterfaceUsage', category: 'usage' };
+  if (lc.includes('connection'))      return { kind: 'ConnectionUsage', category: 'usage' };
+  if (lc.includes('allocation'))      return { kind: 'AllocationUsage', category: 'usage' };
+  if (lc.includes('action'))          return { kind: 'ActionUsage', category: 'behavior' };
+  if (lc.includes('state'))           return { kind: 'StateUsage', category: 'behavior' };
+  if (lc.includes('calculation'))     return { kind: 'CalculationUsage', category: 'behavior' };
+  if (lc.includes('constraint'))      return { kind: 'ConstraintUsage', category: 'constraint' };
+  if (lc.includes('requirement'))     return { kind: 'RequirementUsage', category: 'requirement' };
+  if (lc.includes('concern'))         return { kind: 'ConcernUsage', category: 'requirement' };
+  if (lc.includes('item'))            return { kind: 'ItemUsage', category: 'usage' };
+  if (lc.includes('ref'))             return { kind: 'ReferenceUsage', category: 'usage' };
+  if (lc.includes('enum'))            return { kind: 'EnumerationUsage', category: 'usage' };
 
-  // Fallback by SymbolKind
+  // 3. Fallback by SymbolKind
   switch (sym.kind) {
     case SymbolKind.Package:   return { kind: 'Package', category: 'package' };
     case SymbolKind.Class:     return { kind: 'Definition', category: 'definition' };

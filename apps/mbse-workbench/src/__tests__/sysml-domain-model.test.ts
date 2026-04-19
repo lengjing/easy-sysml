@@ -25,11 +25,95 @@ function makeSymbol(
 }
 
 /* ------------------------------------------------------------------ */
-/*  classifySymbol �?all SysML v2 Definition keywords                 */
+/*  classifySymbol - AST $type (PascalCase from language server)      */
 /* ------------------------------------------------------------------ */
 
 describe('sysml-domain-model', () => {
-  describe('documentSymbolsToDomainModel �?definitions', () => {
+  describe('classifySymbol - AST $type exact match', () => {
+    const astTypeCases: [string, SymbolKind, string, string, string][] = [
+      // Packages
+      ['Package',                     SymbolKind.Package,   'Package',                     'package',      'Pkg'],
+      ['LibraryPackage',              SymbolKind.Package,   'Package',                     'package',      'Lib'],
+
+      // Definitions
+      ['PartDefinition',              SymbolKind.Class,     'PartDefinition',              'definition',   'Motor'],
+      ['AttributeDefinition',         SymbolKind.Class,     'AttributeDefinition',         'definition',   'Speed'],
+      ['PortDefinition',              SymbolKind.Class,     'PortDefinition',              'definition',   'FuelPort'],
+      ['InterfaceDefinition',         SymbolKind.Class,     'InterfaceDefinition',         'definition',   'DataBus'],
+      ['ConnectionDefinition',        SymbolKind.Class,     'ConnectionDefinition',        'definition',   'Link'],
+      ['AllocationDefinition',        SymbolKind.Class,     'AllocationDefinition',        'definition',   'HwAlloc'],
+      ['FlowConnectionDefinition',    SymbolKind.Class,     'FlowConnectionDefinition',    'definition',   'DataFlow'],
+      ['ItemDefinition',              SymbolKind.Class,     'ItemDefinition',              'definition',   'Bolt'],
+      ['OccurrenceDefinition',        SymbolKind.Class,     'OccurrenceDefinition',        'definition',   'Event'],
+      ['EnumerationDefinition',       SymbolKind.Class,     'EnumerationDefinition',       'definition',   'Color'],
+      ['MetadataDefinition',          SymbolKind.Class,     'MetadataDefinition',          'definition',   'Tag'],
+      ['ViewDefinition',              SymbolKind.Class,     'ViewDefinition',              'definition',   'Overview'],
+      ['ViewpointDefinition',         SymbolKind.Class,     'ViewpointDefinition',         'definition',   'UserVP'],
+      ['RenderingDefinition',         SymbolKind.Class,     'RenderingDefinition',         'definition',   'Render'],
+      ['ActionDefinition',            SymbolKind.Method,    'ActionDefinition',            'behavior',     'Start'],
+      ['StateDefinition',             SymbolKind.Method,    'StateDefinition',             'behavior',     'Idle'],
+      ['CalculationDefinition',       SymbolKind.Function,  'CalculationDefinition',       'behavior',     'Calc'],
+      ['ConstraintDefinition',        SymbolKind.Class,     'ConstraintDefinition',        'constraint',   'Limit'],
+      ['RequirementDefinition',       SymbolKind.Class,     'RequirementDefinition',       'requirement',  'MaxSpeed'],
+      ['ConcernDefinition',           SymbolKind.Class,     'ConcernDefinition',           'requirement',  'Safety'],
+      ['CaseDefinition',              SymbolKind.Class,     'CaseDefinition',              'behavior',     'Test1'],
+      ['AnalysisCaseDefinition',      SymbolKind.Class,     'AnalysisCaseDefinition',      'behavior',     'Perf'],
+      ['VerificationCaseDefinition',  SymbolKind.Class,     'VerificationCaseDefinition',  'behavior',     'Verify'],
+      ['UseCaseDefinition',           SymbolKind.Class,     'UseCaseDefinition',           'behavior',     'UseCase'],
+
+      // Usages
+      ['PartUsage',                   SymbolKind.Variable,  'PartUsage',                   'usage',        'engine'],
+      ['AttributeUsage',              SymbolKind.Property,  'AttributeUsage',              'usage',        'power'],
+      ['PortUsage',                   SymbolKind.Variable,  'PortUsage',                   'usage',        'fuelIn'],
+      ['InterfaceUsage',              SymbolKind.Variable,  'InterfaceUsage',              'usage',        'bus1'],
+      ['ConnectionUsage',             SymbolKind.Variable,  'ConnectionUsage',             'usage',        'link1'],
+      ['AllocationUsage',             SymbolKind.Variable,  'AllocationUsage',             'usage',        'alloc1'],
+      ['ItemUsage',                   SymbolKind.Variable,  'ItemUsage',                   'usage',        'bolt1'],
+      ['EnumerationUsage',            SymbolKind.Variable,  'EnumerationUsage',            'usage',        'red'],
+      ['ReferenceUsage',              SymbolKind.Variable,  'ReferenceUsage',              'usage',        'ref1'],
+
+      // Behavioral usages
+      ['ActionUsage',                 SymbolKind.Method,    'ActionUsage',                 'behavior',     'move'],
+      ['StateUsage',                  SymbolKind.Method,    'StateUsage',                  'behavior',     'idle'],
+      ['CalculationUsage',            SymbolKind.Function,  'CalculationUsage',            'behavior',     'calc1'],
+      ['ConstraintUsage',             SymbolKind.Variable,  'ConstraintUsage',             'constraint',   'limit1'],
+      ['RequirementUsage',            SymbolKind.Variable,  'RequirementUsage',            'requirement',  'req1'],
+      ['ConcernUsage',                SymbolKind.Variable,  'ConcernUsage',                'requirement',  'concern1'],
+      ['ExhibitStateUsage',           SymbolKind.Method,    'ExhibitStateUsage',           'behavior',     'exhibit1'],
+      ['PerformActionUsage',          SymbolKind.Method,    'PerformActionUsage',          'behavior',     'perform1'],
+      ['AcceptActionUsage',           SymbolKind.Method,    'AcceptActionUsage',           'behavior',     'accept1'],
+      ['SendActionUsage',             SymbolKind.Method,    'SendActionUsage',             'behavior',     'send1'],
+      ['AssignmentActionUsage',       SymbolKind.Method,    'AssignmentActionUsage',       'behavior',     'assign1'],
+      ['IfActionUsage',               SymbolKind.Method,    'IfActionUsage',               'behavior',     'if1'],
+      ['WhileLoopActionUsage',        SymbolKind.Method,    'WhileLoopActionUsage',        'behavior',     'while1'],
+      ['ForLoopActionUsage',          SymbolKind.Method,    'ForLoopActionUsage',          'behavior',     'for1'],
+      ['TransitionUsage',             SymbolKind.Method,    'TransitionUsage',             'behavior',     'trans1'],
+      ['SatisfyRequirementUsage',     SymbolKind.Variable,  'SatisfyRequirementUsage',     'relationship', 'sat1'],
+      ['AssertConstraintUsage',       SymbolKind.Variable,  'AssertConstraintUsage',       'constraint',   'assert1'],
+
+      // Relationships
+      ['BindingConnector',            SymbolKind.Variable,  'BindingConnector',            'relationship', 'bind1'],
+      ['Succession',                  SymbolKind.Variable,  'Succession',                  'relationship', 'succ1'],
+    ];
+
+    it.each(astTypeCases)(
+      'AST $type "%s" -> kind=%s category=%s',
+      (detail, _symbolKind, expectedKind, expectedCategory, name) => {
+        const symbols: DocumentSymbol[] = [
+          makeSymbol(name, SymbolKind.Class, range(0, 0, 3, 1), detail),
+        ];
+        const model = documentSymbolsToDomainModel(symbols);
+        expect(model.elements[0].kind).toBe(expectedKind);
+        expect(model.elements[0].category).toBe(expectedCategory);
+      },
+    );
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  classifySymbol - keyword-style detail strings                   */
+  /* ---------------------------------------------------------------- */
+
+  describe('documentSymbolsToDomainModel - definitions (keyword-style)', () => {
     const defCases: [string, string, string, string][] = [
       ['part def',             'PartDefinition',             'definition', 'PartDef'],
       ['attribute def',        'AttributeDefinition',        'definition', 'AttrDef'],
@@ -70,7 +154,7 @@ describe('sysml-domain-model', () => {
     );
   });
 
-  describe('documentSymbolsToDomainModel �?usages', () => {
+  describe('documentSymbolsToDomainModel - usages (keyword-style)', () => {
     const usageCases: [string, string, string, string][] = [
       ['part',        'PartUsage',            'usage',      'p1'],
       ['attribute',   'AttributeUsage',       'usage',      'a1'],
@@ -116,7 +200,7 @@ describe('sysml-domain-model', () => {
     );
   });
 
-  describe('documentSymbolsToDomainModel �?packages', () => {
+  describe('documentSymbolsToDomainModel - packages', () => {
     it('classifies "package"', () => {
       const model = documentSymbolsToDomainModel([
         makeSymbol('Pkg', SymbolKind.Package, range(0, 0, 5, 1), 'package'),
@@ -134,7 +218,7 @@ describe('sysml-domain-model', () => {
     });
   });
 
-  describe('documentSymbolsToDomainModel �?SymbolKind fallbacks', () => {
+  describe('documentSymbolsToDomainModel - SymbolKind fallbacks', () => {
     const fallbackCases: [string, SymbolKind, string, string][] = [
       ['Package fallback',   SymbolKind.Package,   'Package',     'package'],
       ['Class fallback',     SymbolKind.Class,     'Definition',  'definition'],
@@ -148,7 +232,7 @@ describe('sysml-domain-model', () => {
     ];
 
     it.each(fallbackCases)(
-      '%s �?%s (%s)',
+      '%s -> %s (%s)',
       (_desc, symbolKind, expectedKind, expectedCategory) => {
         const model = documentSymbolsToDomainModel([
           makeSymbol('x', symbolKind, range(0, 0, 1, 1)),
@@ -159,7 +243,63 @@ describe('sysml-domain-model', () => {
     );
   });
 
-  describe('documentSymbolsToDomainModel �?structure', () => {
+  /* ---------------------------------------------------------------- */
+  /*  Keyword-style ordering: compound keywords must not be swallowed */
+  /* ---------------------------------------------------------------- */
+
+  describe('keyword ordering - compound usages not misclassified', () => {
+    it('"flow connection" is FlowConnectionUsage, not ConnectionUsage', () => {
+      const model = documentSymbolsToDomainModel([
+        makeSymbol('f1', SymbolKind.Variable, range(0, 0, 1, 1), 'flow connection'),
+      ]);
+      // "flow" is checked before "connection" in the usage block
+      expect(model.elements[0].kind).toBe('FlowConnectionUsage');
+    });
+
+    it('"perform action" is PerformActionUsage, not ActionUsage', () => {
+      const model = documentSymbolsToDomainModel([
+        makeSymbol('pa', SymbolKind.Variable, range(0, 0, 1, 1), 'perform action'),
+      ]);
+      expect(model.elements[0].kind).toBe('PerformActionUsage');
+    });
+
+    it('"exhibit state" is ExhibitStateUsage, not StateUsage', () => {
+      const model = documentSymbolsToDomainModel([
+        makeSymbol('es', SymbolKind.Variable, range(0, 0, 1, 1), 'exhibit state'),
+      ]);
+      expect(model.elements[0].kind).toBe('ExhibitStateUsage');
+    });
+
+    it('"send action" is SendActionUsage, not ActionUsage', () => {
+      const model = documentSymbolsToDomainModel([
+        makeSymbol('sa', SymbolKind.Variable, range(0, 0, 1, 1), 'send action'),
+      ]);
+      expect(model.elements[0].kind).toBe('SendActionUsage');
+    });
+
+    it('"accept action" is AcceptActionUsage, not ActionUsage', () => {
+      const model = documentSymbolsToDomainModel([
+        makeSymbol('aa', SymbolKind.Variable, range(0, 0, 1, 1), 'accept action'),
+      ]);
+      expect(model.elements[0].kind).toBe('AcceptActionUsage');
+    });
+
+    it('"satisfy requirement" is SatisfyRequirementUsage, not RequirementUsage', () => {
+      const model = documentSymbolsToDomainModel([
+        makeSymbol('sr', SymbolKind.Variable, range(0, 0, 1, 1), 'satisfy requirement'),
+      ]);
+      expect(model.elements[0].kind).toBe('SatisfyRequirementUsage');
+    });
+
+    it('"assert constraint" is AssertConstraintUsage, not ConstraintUsage', () => {
+      const model = documentSymbolsToDomainModel([
+        makeSymbol('ac', SymbolKind.Variable, range(0, 0, 1, 1), 'assert constraint'),
+      ]);
+      expect(model.elements[0].kind).toBe('AssertConstraintUsage');
+    });
+  });
+
+  describe('documentSymbolsToDomainModel - structure', () => {
     it('converts a flat symbol list', () => {
       const symbols: DocumentSymbol[] = [
         makeSymbol('UAV_System', SymbolKind.Package, range(0, 0, 5, 1), 'package'),
