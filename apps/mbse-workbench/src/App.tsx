@@ -17,9 +17,9 @@ import { AnimatePresence } from 'motion/react';
 import { Box } from 'lucide-react';
 
 import { cn } from './lib/utils';
-import { ModelElement, Project } from './types';
+import { Project } from './types';
 import { initialProject } from './data/initialProject';
-import { KerMLNode } from './components/KerMLNode';
+import { SysMLNode } from './components/SysMLNode';
 import { Header } from './components/Header';
 import { SidebarLeft } from './components/SidebarLeft';
 import { SidebarRight } from './components/SidebarRight';
@@ -29,10 +29,9 @@ import { StatusBar } from './components/StatusBar';
 import { KerMLEditor } from './components/KerMLEditor';
 import { TraceabilityMatrix } from './components/TraceabilityMatrix';
 import { useKerMLParser } from './hooks/useKerMLParser';
-import { applyElementRename, findElementById } from './editor/sysml-ast-parser';
 
 const nodeTypes = {
-  kerml: KerMLNode
+  sysml: SysMLNode,
 };
 
 function WorkbenchContent() {
@@ -69,7 +68,13 @@ function WorkbenchContent() {
   const [nodes, setNodes, onNodesChange] = useNodesState(project.diagrams[0].nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(project.diagrams[0].edges);
 
-  const { nodes: parsedNodes, edges: parsedEdges, parseError, domainModel } = useKerMLParser(kermlCode, showCode);
+  // Use LSP document symbols (no redundant parsing)
+  const {
+    nodes: parsedNodes,
+    edges: parsedEdges,
+    domainModel,
+    handleDocumentSymbols,
+  } = useKerMLParser(kermlCode, showCode);
 
   useEffect(() => {
     if (showCode && parsedNodes.length > 0) {
@@ -83,22 +88,6 @@ function WorkbenchContent() {
     [setEdges]
   );
 
-  const syncCodeFromCanvas = useCallback(() => {
-    if (!domainModel) return;
-    let code = kermlCode;
-    const labelToSysMLIdentifier = (label: string) => label.replace(/\s+/g, '_');
-    for (const node of nodes) {
-      const el = findElementById(domainModel.elements, node.id);
-      const nodeName = labelToSysMLIdentifier(node.data.label);
-      if (el && el.name !== nodeName) {
-        code = applyElementRename(code, el.id, nodeName, domainModel);
-      }
-    }
-    if (code !== kermlCode) {
-      setKermlCode(code);
-    }
-  }, [nodes, domainModel, kermlCode]);
-
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     setMousePos({ x: Math.round(e.clientX), y: Math.round(e.clientY) });
   }, []);
@@ -107,14 +96,17 @@ function WorkbenchContent() {
     const id = `new-node-${nodes.length + 1}`;
     const newNode = {
       id,
-      type: 'kerml',
+      type: 'sysml',
       position: { x: 100 + Math.random() * 400, y: 100 + Math.random() * 400 },
       data: {
         label: `New ${type} ${nodes.length + 1}`,
         type: type,
-        description: `New ${type} element created from explorer.`,
+        kind: type,
+        detail: type.toLowerCase(),
+        category: 'other',
         status: 'Draft',
-        properties: {}
+        properties: {},
+        childCount: 0,
       }
     };
     setNodes((nds) => nds.concat(newNode));
@@ -140,7 +132,7 @@ function WorkbenchContent() {
             ...n, 
             parentNode: targetId, 
             extent: 'parent',
-            position: { x: 20, y: 40 } // Default relative position
+            position: { x: 20, y: 40 }
           };
         }
         return n;
@@ -215,6 +207,7 @@ function WorkbenchContent() {
               onAddElement={addNewElement}
               onDropElement={handleDropElement}
               nodes={nodes}
+              domainModel={domainModel}
             />
           )}
         </AnimatePresence>
@@ -237,8 +230,7 @@ function WorkbenchContent() {
                   <KerMLEditor 
                     kermlCode={kermlCode}
                     setKermlCode={setKermlCode}
-                    parseError={parseError}
-                    syncCodeFromCanvas={syncCodeFromCanvas}
+                    onDocumentSymbols={handleDocumentSymbols}
                   />
                 )}
               </>

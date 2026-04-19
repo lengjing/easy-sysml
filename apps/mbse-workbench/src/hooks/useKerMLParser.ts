@@ -1,127 +1,182 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Node, Edge } from 'reactflow';
-import { parseSysMLToDomainModel, type DomainModel, type DomainElement } from '../editor/sysml-ast-parser';
+/**
+ * Hook: useKerMLParser
+ *
+ * Converts LSP DocumentSymbol[] (pushed from SysMLEditor) into
+ * ReactFlow nodes and edges for the model canvas. No redundant parsing.
+ */
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { type Node, type Edge } from 'reactflow';
+import type { DocumentSymbol } from 'vscode-languageserver-protocol';
+import {
+  documentSymbolsToDomainModel,
+  type DomainModel,
+  type DomainElement,
+} from '../editor/sysml-domain-model';
+
+/* ------------------------------------------------------------------ */
+/*  SysML kind → display type mapping                                 */
+/* ------------------------------------------------------------------ */
+
+function displayType(kind: string): string {
+  switch (kind) {
+    case 'Package':               return 'Package';
+    case 'PartDefinition':        return 'Block';
+    case 'PartUsage':             return 'Part';
+    case 'AttributeDefinition':   return 'Attribute';
+    case 'AttributeUsage':        return 'Attribute';
+    case 'PortDefinition':        return 'Port';
+    case 'PortUsage':             return 'Port';
+    case 'InterfaceDefinition':   return 'Interface';
+    case 'InterfaceUsage':        return 'Interface';
+    case 'ConnectionDefinition':  return 'Interface';
+    case 'ConnectionUsage':       return 'Interface';
+    case 'AllocationDefinition':  return 'Allocation';
+    case 'AllocationUsage':       return 'Allocation';
+    case 'ActionDefinition':      return 'Action';
+    case 'ActionUsage':           return 'Action';
+    case 'StateDefinition':       return 'State';
+    case 'StateUsage':            return 'State';
+    case 'CalculationDefinition': return 'Calculation';
+    case 'CalculationUsage':      return 'Calculation';
+    case 'ConstraintDefinition':  return 'Constraint';
+    case 'ConstraintUsage':       return 'Constraint';
+    case 'RequirementDefinition': return 'Requirement';
+    case 'RequirementUsage':      return 'Requirement';
+    case 'ConcernDefinition':     return 'Concern';
+    case 'ConcernUsage':          return 'Concern';
+    case 'CaseDefinition':        return 'Case';
+    case 'UseCaseDefinition':     return 'UseCase';
+    case 'AnalysisCaseDefinition': return 'AnalysisCase';
+    case 'VerificationCaseDefinition': return 'VerificationCase';
+    case 'ItemDefinition':        return 'Item';
+    case 'ItemUsage':             return 'Item';
+    case 'EnumerationDefinition': return 'Enumeration';
+    case 'EnumerationUsage':      return 'Enumeration';
+    case 'ViewDefinition':        return 'View';
+    case 'ViewpointDefinition':   return 'Viewpoint';
+    case 'RenderingDefinition':   return 'Rendering';
+    case 'MetadataDefinition':    return 'Metadata';
+    case 'OccurrenceDefinition':  return 'Occurrence';
+    case 'FlowConnectionDefinition':
+    case 'FlowConnectionUsage':   return 'Flow';
+    case 'TransitionUsage':       return 'Transition';
+    case 'ExhibitStateUsage':     return 'ExhibitState';
+    case 'PerformActionUsage':    return 'PerformAction';
+    case 'SatisfyRequirementUsage': return 'Satisfy';
+    case 'AssertConstraintUsage': return 'Assert';
+    case 'BindingConnector':      return 'Binding';
+    case 'Succession':            return 'Succession';
+    case 'ReferenceUsage':        return 'Reference';
+    default:                      return kind;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Layout helpers                                                    */
+/* ------------------------------------------------------------------ */
+
+/** Attributes go into the property compartment — not as separate nodes. */
+function isAttributeKind(kind: string): boolean {
+  return kind === 'AttributeUsage' || kind === 'AttributeDefinition';
+}
+
+/**
+ * Build ReactFlow nodes/edges from a flat walk of the domain tree.
+ * Uses depth-based columns, per-depth row counters.
+ */
+function buildGraph(elements: DomainElement[]) {
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  const depthCounters = new Map<number, number>();
+
+  function walk(els: DomainElement[], depth: number, parentId?: string) {
+    for (const el of els) {
+      if (isAttributeKind(el.kind)) continue;    // attributes → properties
+      const row = depthCounters.get(depth) ?? 0;
+      depthCounters.set(depth, row + 1);
+
+      // Collect attribute children as properties dict
+      const properties: Record<string, string> = {};
+      for (const child of el.children) {
+        if (isAttributeKind(child.kind)) {
+          properties[child.name] = child.detail || '';
+        }
+      }
+
+      nodes.push({
+        id: el.id,
+        type: 'sysml',
+        position: { x: 100 + depth * 300, y: 80 + row * 200 },
+        data: {
+          label: el.name,
+          type: displayType(el.kind),
+          kind: el.kind,
+          detail: el.detail,
+          category: el.category,
+          properties,
+          status: 'Draft',
+          childCount: el.children.filter(c => !isAttributeKind(c.kind)).length,
+        },
+      });
+
+      if (parentId) {
+        edges.push({
+          id: `e-${parentId}-${el.id}`,
+          source: parentId,
+          target: el.id,
+          type: 'smoothstep',
+          animated: true,
+          style: { strokeWidth: 1.5 },
+        });
+      }
+
+      const nonAttr = el.children.filter(c => !isAttributeKind(c.kind));
+      if (nonAttr.length > 0) {
+        walk(nonAttr, depth + 1, el.id);
+      }
+    }
+  }
+
+  walk(elements, 0);
+  return { nodes, edges };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Hook                                                              */
+/* ------------------------------------------------------------------ */
 
 export function useKerMLParser(kermlCode: string, showCode: boolean) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [parseError, setParseError] = useState<string | null>(null);
   const [domainModel, setDomainModel] = useState<DomainModel | null>(null);
+  const symbolsRef = useRef<DocumentSymbol[] | null>(null);
 
-  const parseCode = useCallback(() => {
-    if (!showCode || !kermlCode.trim()) return;
+  /** Called by the SysMLEditor when the LSP pushes new symbols. */
+  const handleDocumentSymbols = useCallback((symbols: DocumentSymbol[]) => {
+    symbolsRef.current = symbols;
+    const model = documentSymbolsToDomainModel(symbols);
+    setDomainModel(model);
 
-    try {
-      const model = parseSysMLToDomainModel(kermlCode);
-      setDomainModel(model);
-
-      if (model.errors.length > 0) {
-        setParseError(model.errors.map(e => `L${e.line}:${e.column} ${e.message}`).join('\n'));
-      } else {
-        setParseError(null);
-      }
-
-      // Convert domain elements to ReactFlow nodes with proper layout.
-      // Each depth level gets a unique x offset; siblings at the same depth
-      // are stacked vertically using their index within that depth.
-      const newNodes: Node[] = [];
-      const newEdges: Edge[] = [];
-      const depthCounters = new Map<number, number>();
-
-      function flattenElements(elements: DomainElement[], depth: number) {
-        for (let i = 0; i < elements.length; i++) {
-          const el = elements[i];
-          const row = depthCounters.get(depth) ?? 0;
-          depthCounters.set(depth, row + 1);
-
-          newNodes.push({
-            id: el.id,
-            type: 'kerml',
-            position: { x: 100 + depth * 280, y: 80 + row * 180 },
-            data: {
-              label: el.name,
-              type: mapTypeForDisplay(el.type),
-              description: el.description,
-              status: 'Draft',
-              properties: el.properties,
-            },
-          });
-
-          // Add edges for parent-child relationships
-          const nonAttrChildren = el.children.filter(
-            c => c.type !== 'Attribute' && c.type !== 'AttributeUsage',
-          );
-          for (const child of nonAttrChildren) {
-            newEdges.push({
-              id: `e-${el.id}-${child.id}`,
-              source: el.id,
-              target: child.id,
-              type: 'smoothstep',
-              animated: true,
-            });
-          }
-          if (nonAttrChildren.length > 0) {
-            flattenElements(nonAttrChildren, depth + 1);
-          }
-        }
-      }
-
-      flattenElements(model.elements, 0);
-
-      // Add domain-level edges
-      for (const edge of model.edges) {
-        newEdges.push({
-          id: `e-${edge.sourceId}-${edge.targetId}`,
-          source: edge.sourceId,
-          target: edge.targetId,
-          type: 'smoothstep',
-          animated: true,
-        });
-      }
-
-      if (newNodes.length > 0) {
-        setNodes(newNodes);
-        setEdges(newEdges);
-      }
-    } catch (e) {
-      setParseError(e instanceof Error ? e.message : 'Parsing failed');
+    if (!showCode) return;
+    const { nodes: n, edges: e } = buildGraph(model.elements);
+    if (n.length > 0) {
+      setNodes(n);
+      setEdges(e);
     }
-  }, [kermlCode, showCode]);
+  }, [showCode]);
 
+  // When showCode becomes true, rebuild from latest symbols
   useEffect(() => {
-    const timer = setTimeout(() => parseCode(), 300);
-    return () => clearTimeout(timer);
-  }, [parseCode]);
+    if (showCode && symbolsRef.current) {
+      const model = documentSymbolsToDomainModel(symbolsRef.current);
+      setDomainModel(model);
+      const { nodes: n, edges: e } = buildGraph(model.elements);
+      if (n.length > 0) {
+        setNodes(n);
+        setEdges(e);
+      }
+    }
+  }, [showCode]);
 
-  return { nodes, edges, parseError, setNodes, setEdges, domainModel };
-}
-
-function mapTypeForDisplay(type: string): string {
-  switch (type) {
-    case 'PartDefinition': return 'Block';
-    case 'PartUsage':
-    case 'Part': return 'Part';
-    case 'AttributeDefinition': return 'Attribute';
-    case 'AttributeUsage':
-    case 'Attribute': return 'Attribute';
-    case 'PortDefinition':
-    case 'Port':
-    case 'PortUsage': return 'Port';
-    case 'ActionDefinition':
-    case 'Action':
-    case 'ActionUsage': return 'Action';
-    case 'StateDefinition':
-    case 'State':
-    case 'StateUsage': return 'State';
-    case 'RequirementDefinition':
-    case 'Requirement':
-    case 'RequirementUsage': return 'Requirement';
-    case 'ConstraintDefinition':
-    case 'Constraint':
-    case 'ConstraintUsage': return 'Constraint';
-    case 'ConnectionDefinition': return 'Interface';
-    case 'InterfaceDefinition': return 'Interface';
-    case 'Package': return 'Package';
-    default: return type;
-  }
+  return { nodes, edges, setNodes, setEdges, domainModel, handleDocumentSymbols };
 }

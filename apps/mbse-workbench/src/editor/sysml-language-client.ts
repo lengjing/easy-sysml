@@ -46,6 +46,10 @@ interface DiagnosticCallback {
   (uri: string, diagnostics: Monaco.editor.IMarkerData[]): void;
 }
 
+interface DocumentSymbolCallback {
+  (uri: string, symbols: DocumentSymbol[]): void;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Client                                                            */
 /* ------------------------------------------------------------------ */
@@ -57,6 +61,7 @@ export class SysMLLanguageClient {
   private initPromise: Promise<void> | undefined;
   private versionMap = new Map<string, number>();
   private diagnosticCallback?: DiagnosticCallback;
+  private documentSymbolCallback?: DocumentSymbolCallback;
   private monacoInstance?: typeof Monaco;
 
   constructor() {
@@ -88,6 +93,11 @@ export class SysMLLanguageClient {
           );
           this.diagnosticCallback(params.uri, markers);
         }
+        // When diagnostics arrive the server has finished processing;
+        // request fresh document symbols so the model view stays in sync.
+        if (this.documentSymbolCallback) {
+          this.requestDocumentSymbols(params.uri);
+        }
       },
     );
 
@@ -102,6 +112,11 @@ export class SysMLLanguageClient {
   /** Register a callback for diagnostics pushed by the server. */
   onDiagnostics(callback: DiagnosticCallback): void {
     this.diagnosticCallback = callback;
+  }
+
+  /** Register a callback for document symbols. */
+  onDocumentSymbols(callback: DocumentSymbolCallback): void {
+    this.documentSymbolCallback = callback;
   }
 
   /** Initialize the language server (idempotent). */
@@ -228,6 +243,25 @@ export class SysMLLanguageClient {
     return this.connection.sendRequest(DocumentSymbolRequest.type, {
       textDocument: { uri },
     });
+  }
+
+  /**
+   * Internal: request document symbols and push to callback.
+   * Called automatically after diagnostics arrive.
+   */
+  private async requestDocumentSymbols(uri: string): Promise<void> {
+    try {
+      const result = await this.documentSymbols(uri);
+      if (result && this.documentSymbolCallback) {
+        // Filter to DocumentSymbol (hierarchical) — ignore flat SymbolInformation
+        const symbols = result.filter(
+          (s): s is DocumentSymbol => 'range' in s && 'selectionRange' in s,
+        );
+        this.documentSymbolCallback(uri, symbols);
+      }
+    } catch {
+      // Silently ignore — symbols are best-effort
+    }
   }
 
   /** Dispose the client and terminate the worker. */

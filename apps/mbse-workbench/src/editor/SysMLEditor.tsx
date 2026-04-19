@@ -26,6 +26,8 @@ export interface SysMLEditorProps {
   value: string;
   /** Called whenever the content changes. */
   onChange: (value: string) => void;
+  /** Called when document symbols are updated by the LSP. */
+  onDocumentSymbols?: (symbols: DocumentSymbol[]) => void;
   /** Optional CSS class for the container div. */
   className?: string;
 }
@@ -262,11 +264,14 @@ function registerLSPProviders(monaco: typeof Monaco): void {
 export const SysMLEditor: React.FC<SysMLEditorProps> = ({
   value,
   onChange,
+  onDocumentSymbols,
   className,
 }) => {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const docOpenRef = useRef(false);
+  const onDocumentSymbolsRef = useRef(onDocumentSymbols);
+  onDocumentSymbolsRef.current = onDocumentSymbols;
 
   /** Register the SysML language before Monaco mounts. */
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
@@ -292,6 +297,13 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
         const model = editor.getModel();
         if (model && normalizeUri(uri) === normalizeUri(DOC_URI)) {
           monaco.editor.setModelMarkers(model, 'sysml-lsp', markers);
+        }
+      });
+
+      // Register for document symbols — forward to parent
+      client.onDocumentSymbols((uri, symbols) => {
+        if (normalizeUri(uri) === normalizeUri(DOC_URI)) {
+          onDocumentSymbolsRef.current?.(symbols);
         }
       });
 
