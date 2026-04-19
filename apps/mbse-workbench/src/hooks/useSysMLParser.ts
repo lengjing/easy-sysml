@@ -62,11 +62,32 @@ function displayType(kind: string): string {
     case 'TransitionUsage':       return 'Transition';
     case 'ExhibitStateUsage':     return 'ExhibitState';
     case 'PerformActionUsage':    return 'PerformAction';
+    case 'AcceptActionUsage':     return 'Action';
+    case 'SendActionUsage':       return 'Send';
+    case 'AssignmentActionUsage': return 'Action';
+    case 'IfActionUsage':         return 'Action';
+    case 'WhileLoopActionUsage':  return 'Action';
+    case 'ForLoopActionUsage':    return 'Action';
+    case 'TerminateActionUsage':  return 'Action';
+    case 'IncludeUseCaseUsage':   return 'UseCase';
+    case 'EventOccurrenceUsage':  return 'Occurrence';
     case 'SatisfyRequirementUsage': return 'Satisfy';
     case 'AssertConstraintUsage': return 'Assert';
     case 'BindingConnector':      return 'Binding';
     case 'Succession':            return 'Succession';
     case 'ReferenceUsage':        return 'Reference';
+    case 'OccurrenceUsage':       return 'Occurrence';
+    case 'MetadataUsage':         return 'Metadata';
+    case 'ViewUsage':             return 'View';
+    case 'ViewpointUsage':        return 'Viewpoint';
+    case 'RenderingUsage':        return 'Rendering';
+    case 'CaseUsage':             return 'Case';
+    case 'UseCaseUsage':          return 'UseCase';
+    case 'AnalysisCaseUsage':     return 'AnalysisCase';
+    case 'VerificationCaseUsage': return 'VerificationCase';
+    case 'ConcernUsage':          return 'Concern';
+    case 'SuccessionFlowUsage':   return 'Flow';
+    case 'Namespace':             return 'Namespace';
     default:                      return kind;
   }
 }
