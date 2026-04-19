@@ -372,7 +372,8 @@ export function applyPropertyChange(
         const attrEnd = childNode.$cstNode.end;
         const originalText = source.slice(attrStart, attrEnd);
 
-        // Try to replace just the value portion (handles quoted strings and bare types)
+        // Replace just the value portion after the colon.
+        // Handles common forms: `attribute x : Type`, `attribute x : "value"`.
         const valueMatch = originalText.match(/(:)\s*("(?:[^"\\]|\\.)*"|\S+)/);
         if (valueMatch && valueMatch.index !== undefined) {
           const valueStart = attrStart + valueMatch.index + valueMatch[1].length;

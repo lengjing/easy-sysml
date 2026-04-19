@@ -86,10 +86,10 @@ function WorkbenchContent() {
   const syncCodeFromCanvas = useCallback(() => {
     if (!domainModel) return;
     let code = kermlCode;
-    const toIdentifier = (label: string) => label.replace(/\s+/g, '_');
+    const labelToSysMLIdentifier = (label: string) => label.replace(/\s+/g, '_');
     for (const node of nodes) {
       const el = findElementById(domainModel.elements, node.id);
-      const nodeName = toIdentifier(node.data.label);
+      const nodeName = labelToSysMLIdentifier(node.data.label);
       if (el && el.name !== nodeName) {
         code = applyElementRename(code, el.id, nodeName, domainModel);
       }

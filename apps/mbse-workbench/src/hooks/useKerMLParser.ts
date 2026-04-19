@@ -21,16 +21,23 @@ export function useKerMLParser(kermlCode: string, showCode: boolean) {
         setParseError(null);
       }
 
-      // Convert domain elements to ReactFlow nodes
+      // Convert domain elements to ReactFlow nodes with proper layout.
+      // Each depth level gets a unique x offset; siblings at the same depth
+      // are stacked vertically using their index within that depth.
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
+      const depthCounters = new Map<number, number>();
 
-      function flattenElements(elements: DomainElement[], parentX: number) {
-        for (const el of elements) {
+      function flattenElements(elements: DomainElement[], depth: number) {
+        for (let i = 0; i < elements.length; i++) {
+          const el = elements[i];
+          const row = depthCounters.get(depth) ?? 0;
+          depthCounters.set(depth, row + 1);
+
           newNodes.push({
             id: el.id,
             type: 'kerml',
-            position: { x: parentX, y: 100 + newNodes.length * 180 },
+            position: { x: 100 + depth * 280, y: 80 + row * 180 },
             data: {
               label: el.name,
               type: mapTypeForDisplay(el.type),
@@ -41,27 +48,25 @@ export function useKerMLParser(kermlCode: string, showCode: boolean) {
           });
 
           // Add edges for parent-child relationships
-          if (el.children.length > 0) {
-            const nonAttrChildren = el.children.filter(
-              c => c.type !== 'Attribute' && c.type !== 'AttributeUsage',
-            );
-            for (const child of nonAttrChildren) {
-              newEdges.push({
-                id: `e-${el.id}-${child.id}`,
-                source: el.id,
-                target: child.id,
-                type: 'smoothstep',
-                animated: true,
-              });
-            }
-            flattenElements(nonAttrChildren, parentX + 250);
+          const nonAttrChildren = el.children.filter(
+            c => c.type !== 'Attribute' && c.type !== 'AttributeUsage',
+          );
+          for (const child of nonAttrChildren) {
+            newEdges.push({
+              id: `e-${el.id}-${child.id}`,
+              source: el.id,
+              target: child.id,
+              type: 'smoothstep',
+              animated: true,
+            });
           }
-
-          parentX += 250;
+          if (nonAttrChildren.length > 0) {
+            flattenElements(nonAttrChildren, depth + 1);
+          }
         }
       }
 
-      flattenElements(model.elements, 100);
+      flattenElements(model.elements, 0);
 
       // Add domain-level edges
       for (const edge of model.edges) {
