@@ -27,7 +27,8 @@ interface SidebarLeftProps {
 
 function iconForKind(kind: string) {
   switch (kind) {
-    case 'Package':               return Package;
+    case 'Package':
+    case 'Namespace':             return Package;
     case 'PartDefinition':        return Box;
     case 'PartUsage':             return Component;
     case 'AttributeDefinition':
@@ -38,28 +39,61 @@ function iconForKind(kind: string) {
     case 'InterfaceUsage':
     case 'ConnectionDefinition':
     case 'ConnectionUsage':       return Link2;
+    case 'AllocationDefinition':
+    case 'AllocationUsage':       return Layers;
+    case 'FlowConnectionDefinition':
+    case 'FlowConnectionUsage':   return Network;
     case 'ActionDefinition':
-    case 'ActionUsage':           return ArrowRightCircle;
+    case 'ActionUsage':
+    case 'PerformActionUsage':
+    case 'AcceptActionUsage':
+    case 'SendActionUsage':
+    case 'AssignmentActionUsage':
+    case 'IfActionUsage':
+    case 'WhileLoopActionUsage':
+    case 'ForLoopActionUsage':
+    case 'TerminateActionUsage':  return ArrowRightCircle;
     case 'StateDefinition':
-    case 'StateUsage':            return Activity;
+    case 'StateUsage':
+    case 'ExhibitStateUsage':
+    case 'TransitionUsage':       return Activity;
     case 'CalculationDefinition':
     case 'CalculationUsage':      return Cpu;
     case 'ConstraintDefinition':
-    case 'ConstraintUsage':       return ShieldAlert;
+    case 'ConstraintUsage':
+    case 'AssertConstraintUsage': return ShieldAlert;
     case 'RequirementDefinition':
-    case 'RequirementUsage':      return FileText;
+    case 'RequirementUsage':
+    case 'SatisfyRequirementUsage': return FileText;
     case 'ConcernDefinition':
     case 'ConcernUsage':          return Info;
     case 'CaseDefinition':
-    case 'UseCaseDefinition':     return Target;
-    case 'AnalysisCaseDefinition':return Activity;
-    case 'VerificationCaseDefinition': return ShieldCheck;
+    case 'CaseUsage':
+    case 'UseCaseDefinition':
+    case 'UseCaseUsage':
+    case 'IncludeUseCaseUsage':   return Target;
+    case 'AnalysisCaseDefinition':
+    case 'AnalysisCaseUsage':     return Activity;
+    case 'VerificationCaseDefinition':
+    case 'VerificationCaseUsage': return ShieldCheck;
     case 'ItemDefinition':
     case 'ItemUsage':             return Inbox;
     case 'EnumerationDefinition':
     case 'EnumerationUsage':      return Database;
+    case 'OccurrenceDefinition':
+    case 'OccurrenceUsage':
+    case 'EventOccurrenceUsage':  return Zap;
+    case 'MetadataDefinition':
+    case 'MetadataUsage':         return Database;
     case 'ViewDefinition':
-    case 'ViewpointDefinition':   return Eye;
+    case 'ViewUsage':
+    case 'RenderingDefinition':
+    case 'RenderingUsage':        return Eye;
+    case 'ViewpointDefinition':
+    case 'ViewpointUsage':        return Target;
+    case 'ReferenceUsage':        return Link2;
+    case 'BindingConnector':
+    case 'Succession':            return Link2;
     default:                      return Box;
   }
 }

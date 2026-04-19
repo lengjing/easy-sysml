@@ -7,15 +7,28 @@ interface SysMLEditorPanelProps {
   code: string;
   setCode: (code: string) => void;
   onDocumentSymbols?: (symbols: DocumentSymbol[]) => void;
+  /** When false the panel is kept mounted (preserving undo history) but hidden. */
+  visible?: boolean;
 }
 
 export const SysMLEditorPanel = ({
   code,
   setCode,
   onDocumentSymbols,
+  visible = true,
 }: SysMLEditorPanelProps) => {
+  // Always render the same tree so the Monaco editor instance (and its undo
+  // stack) survives hide/show toggles.  When hidden, move off-screen with
+  // zero dimensions so it doesn't affect layout.
   return (
-    <div className="w-1/2 border-l border-[var(--border-color)] bg-[var(--bg-sidebar)] flex flex-col transition-all duration-300">
+    <div
+      className={
+        visible
+          ? 'w-1/2 border-l border-[var(--border-color)] bg-[var(--bg-sidebar)] flex flex-col transition-all duration-300'
+          : 'absolute -left-[9999px] w-0 h-0 overflow-hidden pointer-events-none'
+      }
+      aria-hidden={!visible}
+    >
       <div className="h-10 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-header)]/50">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
