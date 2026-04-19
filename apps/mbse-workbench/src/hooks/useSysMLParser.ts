@@ -85,7 +85,6 @@ function displayType(kind: string): string {
     case 'UseCaseUsage':          return 'UseCase';
     case 'AnalysisCaseUsage':     return 'AnalysisCase';
     case 'VerificationCaseUsage': return 'VerificationCase';
-    case 'ConcernUsage':          return 'Concern';
     case 'SuccessionFlowUsage':   return 'Flow';
     case 'Namespace':             return 'Namespace';
     default:                      return kind;

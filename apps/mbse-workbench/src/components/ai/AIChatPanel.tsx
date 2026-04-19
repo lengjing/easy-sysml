@@ -2,8 +2,9 @@
  * AI Chat Panel
  *
  * Provides a conversational interface for generating SysML v2 text via
- * Google Generative AI (Gemini). Users type a natural-language description
- * and the AI returns SysML v2 code that can be applied to the editor.
+ * Gemini, DeepSeek, Qwen, or any OpenAI-compatible API. Users type a
+ * natural-language description and the AI returns SysML v2 code that can
+ * be applied to the editor.
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
@@ -17,10 +18,13 @@ import { cn } from '../../lib/utils';
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
 
+type AIProvider = 'gemini' | 'deepseek' | 'qwen' | 'openai-compatible';
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'error';
   content: string;
+  provider?: string;
   /** Extracted SysML code blocks (if any). */
   codeBlocks: string[];
   timestamp: number;
@@ -31,6 +35,13 @@ interface AIChatPanelProps {
   onApplyCode: (code: string) => void;
   /** Current editor content — sent as context to the AI. */
   currentCode?: string;
+}
+
+interface AISettings {
+  provider: AIProvider;
+  apiKeys: Record<AIProvider, string>;
+  model: string;
+  baseUrl: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -66,17 +77,221 @@ Always produce complete, valid SysML v2 code. If the user asks a question about 
 Respond in the same language as the user's input (Chinese or English).`;
 
 /* ------------------------------------------------------------------ */
+/*  Provider configuration                                            */
+/* ------------------------------------------------------------------ */
+
+const PROVIDER_PRESETS: Record<AIProvider, { label: string; model: string; baseUrl?: string }> = {
+  gemini: {
+    label: 'Gemini',
+    model: 'gemini-2.0-flash',
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    model: 'deepseek-chat',
+    baseUrl: 'https://api.deepseek.com/v1/chat/completions',
+  },
+  qwen: {
+    label: 'Qwen',
+    model: 'qwen-plus',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+  },
+  'openai-compatible': {
+    label: 'OpenAI 兼容',
+    model: 'gpt-4o-mini',
+    baseUrl: 'https://api.openai.com/v1/chat/completions',
+  },
+};
+
+const AI_SETTINGS_KEY = 'easy-sysml.ai-settings';
+
+/* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
 
 let _aiClient: GoogleGenAI | null = null;
+let _aiClientKey = '';
 
-function getAIClient(): GoogleGenAI | null {
-  if (_aiClient) return _aiClient;
-  const apiKey = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || '';
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') return null;
+function getEnvValue(name: string): string {
+  if (typeof process === 'undefined') return '';
+  const value = (process as { env?: Record<string, string | undefined> }).env?.[name];
+  return typeof value === 'string' ? value : '';
+}
+
+function isConfiguredValue(value?: string): boolean {
+  if (!value) return false;
+  return !/^MY_[A-Z0-9_]+$/.test(value.trim());
+}
+
+function getDefaultProvider(): AIProvider {
+  const explicit = getEnvValue('AI_PROVIDER');
+  if (explicit === 'gemini' || explicit === 'deepseek' || explicit === 'qwen' || explicit === 'openai-compatible') {
+    return explicit;
+  }
+  if (isConfiguredValue(getEnvValue('GEMINI_API_KEY'))) return 'gemini';
+  if (isConfiguredValue(getEnvValue('DEEPSEEK_API_KEY'))) return 'deepseek';
+  if (isConfiguredValue(getEnvValue('QWEN_API_KEY'))) return 'qwen';
+  if (isConfiguredValue(getEnvValue('OPENAI_API_KEY'))) return 'openai-compatible';
+  return 'gemini';
+}
+
+function getDefaultSettings(): AISettings {
+  const provider = getDefaultProvider();
+  return {
+    provider,
+    apiKeys: {
+      gemini: getEnvValue('GEMINI_API_KEY'),
+      deepseek: getEnvValue('DEEPSEEK_API_KEY'),
+      qwen: getEnvValue('QWEN_API_KEY'),
+      'openai-compatible': getEnvValue('OPENAI_API_KEY'),
+    },
+    model: getEnvValue('AI_MODEL') || PROVIDER_PRESETS[provider].model,
+    baseUrl: getEnvValue('AI_BASE_URL') || PROVIDER_PRESETS[provider].baseUrl || '',
+  };
+}
+
+function loadAISettings(): AISettings {
+  const defaults = getDefaultSettings();
+  if (typeof window === 'undefined') return defaults;
+
+  try {
+    const raw = window.localStorage.getItem(AI_SETTINGS_KEY);
+    if (!raw) return defaults;
+
+    const parsed = JSON.parse(raw) as Partial<AISettings>;
+    return {
+      provider:
+        parsed.provider === 'gemini'
+        || parsed.provider === 'deepseek'
+        || parsed.provider === 'qwen'
+        || parsed.provider === 'openai-compatible'
+          ? parsed.provider
+          : defaults.provider,
+      apiKeys: {
+        ...defaults.apiKeys,
+        ...(parsed.apiKeys || {}),
+      },
+      model: typeof parsed.model === 'string' && parsed.model.trim()
+        ? parsed.model
+        : defaults.model,
+      baseUrl: typeof parsed.baseUrl === 'string'
+        ? parsed.baseUrl
+        : defaults.baseUrl,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveAISettings(settings: AISettings): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function getAIClient(apiKey: string): GoogleGenAI | null {
+  if (!isConfiguredValue(apiKey)) return null;
+  if (_aiClient && _aiClientKey === apiKey) return _aiClient;
+  _aiClientKey = apiKey;
   _aiClient = new GoogleGenAI({ apiKey });
   return _aiClient;
+}
+
+function isAIAvailable(settings: AISettings): boolean {
+  const apiKey = settings.apiKeys[settings.provider];
+  if (!isConfiguredValue(apiKey)) return false;
+  if (settings.provider === 'gemini') return true;
+  return !!settings.baseUrl.trim();
+}
+
+function getProviderHelpText(provider: AIProvider): string {
+  switch (provider) {
+    case 'deepseek':
+      return '使用 DeepSeek 官方 OpenAI 兼容接口。';
+    case 'qwen':
+      return '使用阿里云 DashScope 的 OpenAI 兼容模式。';
+    case 'openai-compatible':
+      return '可填写任意兼容 OpenAI Chat Completions 的地址。';
+    default:
+      return '使用 Google Gemini 原生接口。';
+  }
+}
+
+async function generateAIResponse(settings: AISettings, userText: string, currentCode?: string): Promise<string> {
+  const apiKey = settings.apiKeys[settings.provider]?.trim();
+  if (!isConfiguredValue(apiKey)) {
+    throw new Error('请先配置所选模型提供商的 API Key。');
+  }
+
+  if (settings.provider === 'gemini') {
+    const client = getAIClient(apiKey);
+    if (!client) {
+      throw new Error('Gemini API Key 无效或未配置。');
+    }
+
+    const contextParts: string[] = [SYSTEM_PROMPT];
+    if (currentCode) {
+      contextParts.push(`\nThe user's current SysML v2 model is:\n\`\`\`sysml\n${currentCode}\n\`\`\``);
+    }
+
+    const response = await client.models.generateContent({
+      model: settings.model || PROVIDER_PRESETS.gemini.model,
+      contents: [
+        { role: 'user', parts: [{ text: `${contextParts.join('\n')}\n\nUser request: ${userText}` }] },
+      ],
+    });
+
+    return response?.text ?? '';
+  }
+
+  if (!settings.baseUrl.trim()) {
+    throw new Error('请先配置兼容 OpenAI 的接口地址。');
+  }
+
+  const response = await fetch(settings.baseUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: settings.model || PROVIDER_PRESETS[settings.provider].model,
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...(currentCode
+          ? [{ role: 'user', content: `The user's current SysML v2 model is:\n\`\`\`sysml\n${currentCode}\n\`\`\`` }]
+          : []),
+        { role: 'user', content: userText },
+      ],
+    }),
+  });
+
+  const rawText = await response.text();
+  let payload: any = null;
+
+  try {
+    payload = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    if (!response.ok) {
+      throw new Error(`AI 请求失败 (${response.status})`);
+    }
+    throw new Error('AI 返回了无法解析的内容。');
+  }
+
+  if (!response.ok) {
+    const message = payload?.error?.message || payload?.message || `AI 请求失败 (${response.status})`;
+    throw new Error(message);
+  }
+
+  const text = payload?.choices?.[0]?.message?.content;
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new Error('AI 返回为空，请检查模型名称和接口地址。');
+  }
+
+  return text;
 }
 
 /** Extract ```sysml ... ``` or ```...``` code blocks from markdown text. */
@@ -118,10 +333,24 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<AISettings>(() => loadAISettings());
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const aiAvailable = !!getAIClient();
+  const providerMeta = PROVIDER_PRESETS[settings.provider];
+  const currentApiKey = settings.apiKeys[settings.provider] || '';
+  const aiAvailable = isAIAvailable(settings);
+
+  useEffect(() => {
+    saveAISettings(settings);
+  }, [settings]);
+
+  useEffect(() => {
+    if (!aiAvailable) {
+      setShowSettings(true);
+    }
+  }, [aiAvailable]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -130,9 +359,18 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     }
   }, [messages, loading]);
 
+  const handleProviderChange = useCallback((provider: AIProvider) => {
+    setSettings(prev => ({
+      ...prev,
+      provider,
+      model: PROVIDER_PRESETS[provider].model,
+      baseUrl: PROVIDER_PRESETS[provider].baseUrl || '',
+    }));
+  }, []);
+
   const handleSend = useCallback(async (text?: string) => {
     const userText = (text ?? input).trim();
-    if (!userText || loading) return;
+    if (!userText || loading || !aiAvailable) return;
     setInput('');
 
     const userMsg: ChatMessage = {
@@ -146,31 +384,14 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     setLoading(true);
 
     try {
-      const client = getAIClient();
-      if (!client) {
-        throw new Error('AI 服务不可用：请配置 GEMINI_API_KEY 环境变量。');
-      }
-
-      // Build context
-      const contextParts: string[] = [SYSTEM_PROMPT];
-      if (currentCode) {
-        contextParts.push(`\nThe user's current SysML v2 model is:\n\`\`\`sysml\n${currentCode}\n\`\`\``);
-      }
-
-      const response = await client.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [
-          { role: 'user', parts: [{ text: contextParts.join('\n') + '\n\nUser request: ' + userText }] },
-        ],
-      });
-
-      const responseText = response?.text ?? '';
+      const responseText = await generateAIResponse(settings, userText, currentCode);
       const codeBlocks = extractCodeBlocks(responseText);
 
       const assistantMsg: ChatMessage = {
         id: makeId(),
         role: 'assistant',
         content: responseText,
+        provider: providerMeta.label,
         codeBlocks,
         timestamp: Date.now(),
       };
@@ -180,6 +401,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         id: makeId(),
         role: 'error',
         content: err.message || '生成失败，请稍后重试。',
+        provider: providerMeta.label,
         codeBlocks: [],
         timestamp: Date.now(),
       };
@@ -187,7 +409,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [input, loading, currentCode]);
+  }, [aiAvailable, currentCode, input, loading, providerMeta.label, settings]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -223,6 +445,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         </div>
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setShowSettings(v => !v)}
+            className="px-2 py-1 rounded border border-[var(--border-color)] text-[9px] font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-purple-500/50 transition-colors"
+            title="API 设置"
+          >
+            {providerMeta.label}
+          </button>
+          <button
             onClick={handleNewChat}
             className="p-1 hover:bg-[var(--border-color)] rounded text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
             title="新对话"
@@ -231,6 +460,56 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {showSettings && (
+        <div className="border-b border-[var(--border-color)] p-2 bg-[var(--bg-main)]/50 space-y-2">
+          <div className="grid grid-cols-1 gap-2">
+            <select
+              value={settings.provider}
+              onChange={e => handleProviderChange(e.target.value as AIProvider)}
+              className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-2.5 py-2 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-purple-500"
+            >
+              {Object.entries(PROVIDER_PRESETS).map(([value, meta]) => (
+                <option key={value} value={value}>{meta.label}</option>
+              ))}
+            </select>
+
+            <input
+              type="password"
+              value={currentApiKey}
+              onChange={e => setSettings(prev => ({
+                ...prev,
+                apiKeys: {
+                  ...prev.apiKeys,
+                  [prev.provider]: e.target.value,
+                },
+              }))}
+              placeholder="输入 API Key"
+              className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-2.5 py-2 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-purple-500"
+            />
+
+            <input
+              value={settings.model}
+              onChange={e => setSettings(prev => ({ ...prev, model: e.target.value }))}
+              placeholder="模型名称"
+              className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-2.5 py-2 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-purple-500"
+            />
+
+            {settings.provider !== 'gemini' && (
+              <input
+                value={settings.baseUrl}
+                onChange={e => setSettings(prev => ({ ...prev, baseUrl: e.target.value }))}
+                placeholder="OpenAI 兼容接口地址"
+                className="bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-2.5 py-2 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-purple-500"
+              />
+            )}
+          </div>
+
+          <div className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+            {getProviderHelpText(settings.provider)} 配置会保存在当前浏览器本地。
+          </div>
+        </div>
+      )}
 
       {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
@@ -242,8 +521,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 <Sparkles size={24} className="text-purple-500" />
               </div>
               <h3 className="text-sm font-bold text-[var(--text-main)] mb-1">AI 建模助手</h3>
-              <p className="text-[11px] text-[var(--text-muted)] max-w-[200px] mx-auto leading-relaxed">
-                用自然语言描述您想要的模型，AI 将生成 SysML v2 代码
+              <p className="text-[11px] text-[var(--text-muted)] max-w-[220px] mx-auto leading-relaxed">
+                支持 Gemini、DeepSeek、Qwen 和自定义兼容接口
               </p>
             </div>
             <div className="space-y-2">
@@ -254,8 +533,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 <button
                   key={i}
                   onClick={() => handleSend(qp.prompt)}
-                  disabled={loading}
-                  className="w-full text-left p-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/50 hover:bg-purple-500/5 transition-all group"
+                  disabled={loading || !aiAvailable}
+                  className="w-full text-left p-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/50 hover:bg-purple-500/5 transition-all group disabled:opacity-50"
                 >
                   <div className="flex items-center gap-2">
                     <MessageSquare size={12} className="text-purple-500 flex-shrink-0" />
@@ -291,7 +570,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   ) : (
                     <>
                       <Sparkles size={10} className="text-purple-500" />
-                      <span className="text-[9px] font-bold text-purple-500 uppercase">AI</span>
+                      <span className="text-[9px] font-bold text-purple-500 uppercase">
+                        {msg.provider || 'AI'}
+                      </span>
                     </>
                   )}
                 </div>
@@ -343,7 +624,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             {loading && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--bg-main)] border border-[var(--border-color)]">
                 <Loader2 size={14} className="text-purple-500 animate-spin" />
-                <span className="text-[11px] text-[var(--text-muted)]">AI 正在生成...</span>
+                <span className="text-[11px] text-[var(--text-muted)]">{providerMeta.label} 正在生成...</span>
               </div>
             )}
           </div>
@@ -356,7 +637,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           <div className="mb-2 flex items-center gap-1.5 px-2 py-1.5 rounded bg-amber-500/10 border border-amber-500/20">
             <AlertCircle size={12} className="text-amber-500 flex-shrink-0" />
             <span className="text-[10px] text-amber-600 dark:text-amber-400">
-              请配置 GEMINI_API_KEY 以启用 AI 功能
+              请先配置 API Key，已支持 Gemini / DeepSeek / Qwen / OpenAI 兼容接口
             </span>
           </div>
         )}
@@ -366,7 +647,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={aiAvailable ? '描述您想要的模型...' : '请先配置 API Key'}
+            placeholder={aiAvailable ? `描述您想要的模型（当前：${providerMeta.label}）...` : '请先配置 API Key'}
             disabled={loading || !aiAvailable}
             rows={1}
             className="flex-1 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[11px] focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 transition-all resize-none text-[var(--text-main)] placeholder:text-[var(--text-muted)] disabled:opacity-50 min-h-[36px] max-h-[120px]"

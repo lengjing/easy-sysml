@@ -15,6 +15,11 @@ View your app in AI Studio: https://ai.studio/apps/abc26de7-d5c2-4b21-8bfb-e4c53
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Configure one of the supported AI providers in `.env.local`:
+   - Gemini: `GEMINI_API_KEY`
+   - DeepSeek: `DEEPSEEK_API_KEY`
+   - Qwen: `QWEN_API_KEY`
+   - Any OpenAI-compatible endpoint: `OPENAI_API_KEY`, optionally `AI_BASE_URL` and `AI_MODEL`
+3. Or paste the key, model, and endpoint directly in the in-app AI settings panel
+4. Run the app:
    `npm run dev`
