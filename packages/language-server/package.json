@@ -11,9 +11,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./browser": {
-      "types": "./dist/sysml-browser-module.d.ts",
-      "import": "./dist/sysml-browser-module.js"
+    "./main": {
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
     },
     "./main-browser": {
       "types": "./dist/main-browser.d.ts",
