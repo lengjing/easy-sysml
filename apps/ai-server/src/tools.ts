@@ -110,6 +110,8 @@ async function runValidation(code: string): Promise<ValidationResult> {
     try { langiumDocuments.deleteDocument(uri); } catch { /* ignore */ }
     if (langiumDocuments.hasDocument(uri)) {
       const doc = langiumDocuments.getDocument(uri)!;
+      // LangiumDocument.textDocument is not part of the public API but is
+      // needed to update content without recreating the document.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const docAny = doc as any;
       const textDoc = docAny.textDocument;

@@ -147,12 +147,14 @@ app.post('/api/chat', async (req: express.Request, res: express.Response) => {
 
     const fullMessages = [...systemMessages, ...messages];
 
+    const maxSteps = parseInt(process.env.MAX_AGENT_STEPS || '5', 10);
+
     // Use Vercel AI SDK streamText with MCP tools and multi-step agent loop
     const result = streamText({
       model,
       messages: fullMessages,
       tools: mcpTools,
-      stopWhen: stepCountIs(5), // Agent can call tools across up to 5 steps
+      stopWhen: stepCountIs(maxSteps),
       temperature: 0.3,
       experimental_onToolCallStart: ({ toolCall }) => {
         sseWrite(res, 'tool_call', {
@@ -324,5 +326,6 @@ app.listen(PORT, () => {
   console.log(`[AI Agent Server] Provider: ${preset.label} (${getModelId(provider)})`);
   console.log(`[AI Agent Server] API Key: ${getApiKey(provider) ? '✓ configured' : '✗ missing'}`);
   console.log(`[AI Agent Server] Tools: ${Object.keys(mcpTools).join(', ')}`);
-  console.log(`[AI Agent Server] Agent mode: maxSteps=5 (multi-step tool calling)`);
+  const maxStepsConfig = parseInt(process.env.MAX_AGENT_STEPS || '5', 10);
+  console.log(`[AI Agent Server] Agent mode: maxSteps=${maxStepsConfig} (multi-step tool calling)`);
 });
