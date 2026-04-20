@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useViewport } from 'reactflow';
-import { MousePointer2, ZoomIn, CheckCircle2, History, Terminal } from 'lucide-react';
+import { MousePointer2, ZoomIn, CheckCircle2, History, Terminal, FileCode } from 'lucide-react';
 
-export const StatusBar = () => {
+interface StatusBarProps {
+  /** Name of the currently active file. */
+  activeFileName?: string;
+}
+
+export const StatusBar = ({ activeFileName }: StatusBarProps) => {
   const { zoom } = useViewport();
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
@@ -37,6 +42,15 @@ export const StatusBar = () => {
           <span>操作历史 (12)</span>
         </button>
         <div className="h-3 w-px bg-[var(--border-color)]" />
+        {activeFileName && (
+          <>
+            <div className="flex items-center gap-1.5 text-[var(--text-muted)]">
+              <FileCode size={12} />
+              <span>{activeFileName}</span>
+            </div>
+            <div className="h-3 w-px bg-[var(--border-color)]" />
+          </>
+        )}
         <button className="flex items-center gap-1.5 hover:text-[var(--text-main)] transition-colors">
           <Terminal size={12} />
           <span>终端日志</span>

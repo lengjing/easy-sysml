@@ -30,10 +30,12 @@ export interface SysMLEditorProps {
   onDocumentSymbols?: (symbols: DocumentSymbol[]) => void;
   /** Optional CSS class for the container div. */
   className?: string;
+  /** Optional file URI for LSP communication (multi-file support). */
+  fileUri?: string;
 }
 
-/** Document URI used for LSP communication. */
-const DOC_URI = 'inmemory:///model.sysml';
+/** Default document URI used for LSP communication. */
+const DEFAULT_DOC_URI = 'inmemory:///model.sysml';
 
 /** Normalize a URI to ensure triple-slash authority (Langium may collapse it). */
 const normalizeUri = (u: string) => u.replace(/^(\w+:)\/*/, '$1///');
@@ -57,12 +59,17 @@ function getClient(): SysMLLanguageClient {
 function registerLSPProviders(monaco: typeof Monaco): void {
   const client = getClient();
 
+  /** Extract the document URI from a Monaco model. */
+  function modelUri(model: Monaco.editor.ITextModel): string {
+    return model.uri.toString();
+  }
+
   // Hover provider
   monaco.languages.registerHoverProvider(SYSML_LANGUAGE_ID, {
     async provideHover(model, position) {
       try {
         const hover = await client.hover(
-          DOC_URI,
+          modelUri(model),
           position.lineNumber - 1,
           position.column - 1,
         );
@@ -98,7 +105,7 @@ function registerLSPProviders(monaco: typeof Monaco): void {
     async provideCompletionItems(model, position) {
       try {
         const result = await client.completion(
-          DOC_URI,
+          modelUri(model),
           position.lineNumber - 1,
           position.column - 1,
         );
@@ -153,7 +160,7 @@ function registerLSPProviders(monaco: typeof Monaco): void {
     async provideDefinition(model, position) {
       try {
         const result = await client.definition(
-          DOC_URI,
+          modelUri(model),
           position.lineNumber - 1,
           position.column - 1,
         );
@@ -196,7 +203,7 @@ function registerLSPProviders(monaco: typeof Monaco): void {
   monaco.languages.registerDocumentSymbolProvider(SYSML_LANGUAGE_ID, {
     async provideDocumentSymbols(model) {
       try {
-        const result = await client.documentSymbols(DOC_URI);
+        const result = await client.documentSymbols(modelUri(model));
         if (!result) return [];
 
         function mapSymbol(
@@ -266,12 +273,20 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
   onChange,
   onDocumentSymbols,
   className,
+  fileUri,
 }) => {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const docOpenRef = useRef(false);
   const onDocumentSymbolsRef = useRef(onDocumentSymbols);
   onDocumentSymbolsRef.current = onDocumentSymbols;
+
+  /** The effective URI for the current document. */
+  const currentUri = fileUri || DEFAULT_DOC_URI;
+  const currentUriRef = useRef(currentUri);
+
+  /** Track the previous URI so we can close the old document when switching. */
+  const prevUriRef = useRef<string | null>(null);
 
   /** Register the SysML language before Monaco mounts. */
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
@@ -292,24 +307,26 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
       const client = getClient();
       client.setMonaco(monaco);
 
-      // Register for diagnostics
+      // Register for diagnostics — match any model URI in this editor
       client.onDiagnostics((uri, markers) => {
         const model = editor.getModel();
-        if (model && normalizeUri(uri) === normalizeUri(DOC_URI)) {
+        if (model && normalizeUri(uri) === normalizeUri(model.uri.toString())) {
           monaco.editor.setModelMarkers(model, 'sysml-lsp', markers);
         }
       });
 
-      // Register for document symbols — forward to parent
+      // Register for document symbols — forward to parent for the current URI
       client.onDocumentSymbols((uri, symbols) => {
-        if (normalizeUri(uri) === normalizeUri(DOC_URI)) {
+        if (normalizeUri(uri) === normalizeUri(currentUriRef.current)) {
           onDocumentSymbolsRef.current?.(symbols);
         }
       });
 
-      // Open the document
-      client.didOpen(DOC_URI, value).then(() => {
+      // Open the document with the current URI
+      const uri = currentUriRef.current;
+      client.didOpen(uri, value).then(() => {
         docOpenRef.current = true;
+        prevUriRef.current = uri;
       });
 
       editor.focus();
@@ -322,10 +339,29 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
       const text = val ?? '';
       onChange(text);
 
-      getClient().didChange(DOC_URI, text);
+      getClient().didChange(currentUriRef.current, text);
     },
     [onChange],
   );
+
+  /** Handle file URI changes — close old doc, open new doc with the server. */
+  useEffect(() => {
+    currentUriRef.current = currentUri;
+
+    if (!docOpenRef.current) return;
+    const client = getClient();
+
+    // If the URI changed, close the old and open the new
+    if (prevUriRef.current && prevUriRef.current !== currentUri) {
+      // Don't close the old document — keep it open in the LSP server for
+      // cross-file references. Just open the new one if not already open.
+      client.didOpen(currentUri, value).catch(() => {
+        // May already be open — that's fine, send a change instead
+        client.didChange(currentUri, value);
+      });
+      prevUriRef.current = currentUri;
+    }
+  }, [currentUri, value]);
 
   /** Observe theme changes (dark ↔ light). */
   useEffect(() => {
@@ -346,8 +382,8 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
   /** Cleanup on unmount. */
   useEffect(() => {
     return () => {
-      if (docOpenRef.current) {
-        getClient().didClose(DOC_URI);
+      if (docOpenRef.current && currentUriRef.current) {
+        getClient().didClose(currentUriRef.current);
         docOpenRef.current = false;
       }
     };

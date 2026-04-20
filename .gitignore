@@ -6,3 +6,4 @@ out/
 v/
 packages/grammar/src/generated/
 apps/playground/src/generated/
+bin/

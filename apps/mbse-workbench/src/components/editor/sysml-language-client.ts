@@ -156,6 +156,10 @@ export class SysMLLanguageClient {
   /** Notify the server that a document was opened. */
   async didOpen(uri: string, text: string): Promise<void> {
     await this.initialize();
+    // If the document is already open, send a change instead of re-opening
+    if (this.versionMap.has(uri)) {
+      return this.didChange(uri, text);
+    }
     this.versionMap.set(uri, 1);
     this.connection.sendNotification(
       DidOpenTextDocumentNotification.type,
