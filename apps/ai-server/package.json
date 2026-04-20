@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AI Agent Server for SysML v2 modeling assistance with tool calling and grammar validation",
+  "description": "AI Agent Server for SysML v2 modeling — Vercel AI SDK with MCP tools (validate_sysml, get_stdlib_types)",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
@@ -12,13 +12,16 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@easy-sysml/language-server": "workspace:*",
+    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/openai": "^3.0.53",
     "@easy-sysml/grammar": "workspace:*",
-    "@google/genai": "^1.29.0",
+    "@easy-sysml/language-server": "workspace:*",
+    "ai": "^6.0.168",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "langium": "~4.2.2"
+    "langium": "~4.2.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

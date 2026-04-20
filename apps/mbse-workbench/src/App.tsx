@@ -145,7 +145,7 @@ function WorkbenchContent() {
 
                 {/* AI Chat Panel */}
                 {showAI && (
-                  <div className="w-[340px] border-l border-[var(--border-color)] flex-shrink-0">
+                  <div className="w-[420px] border-l border-[var(--border-color)] flex-shrink-0">
                     <AIChatPanel
                       onApplyCode={handleApplyAICode}
                       currentCode={kermlCode}

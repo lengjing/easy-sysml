@@ -110,32 +110,32 @@ const markdownComponents = {
     // Inline code only — block code is handled differently
     if (className?.includes('language-')) return null;
     return (
-      <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-mono text-purple-600 dark:text-purple-400" {...props}>
+      <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-xs font-mono text-purple-600 dark:text-purple-400" {...props}>
         {children}
       </code>
     );
   },
   pre: () => null, // Block code is stripped — auto-synced to editor
   ul: ({ children, ...props }: React.HTMLAttributes<HTMLUListElement>) => (
-    <ul className="list-disc pl-4 mb-2 space-y-0.5" {...props}>{children}</ul>
+    <ul className="list-disc pl-5 mb-2 space-y-1" {...props}>{children}</ul>
   ),
   ol: ({ children, ...props }: React.HTMLAttributes<HTMLOListElement>) => (
-    <ol className="list-decimal pl-4 mb-2 space-y-0.5" {...props}>{children}</ol>
+    <ol className="list-decimal pl-5 mb-2 space-y-1" {...props}>{children}</ol>
   ),
   li: ({ children, ...props }: React.HTMLAttributes<HTMLLIElement>) => (
-    <li className="text-[11px]" {...props}>{children}</li>
+    <li className="text-[13px]" {...props}>{children}</li>
   ),
   h1: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h1 className="text-sm font-bold mb-1 text-[var(--text-main)]" {...props}>{children}</h1>
+    <h1 className="text-base font-bold mb-1.5 text-[var(--text-main)]" {...props}>{children}</h1>
   ),
   h2: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h2 className="text-[12px] font-bold mb-1 text-[var(--text-main)]" {...props}>{children}</h2>
+    <h2 className="text-sm font-bold mb-1 text-[var(--text-main)]" {...props}>{children}</h2>
   ),
   h3: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h3 className="text-[11px] font-bold mb-1 text-[var(--text-main)]" {...props}>{children}</h3>
+    <h3 className="text-[13px] font-bold mb-1 text-[var(--text-main)]" {...props}>{children}</h3>
   ),
   blockquote: ({ children, ...props }: React.HTMLAttributes<HTMLQuoteElement>) => (
-    <blockquote className="border-l-2 border-purple-500/30 pl-2 my-1 text-[var(--text-muted)]" {...props}>{children}</blockquote>
+    <blockquote className="border-l-2 border-purple-500/30 pl-3 my-1.5 text-[var(--text-muted)]" {...props}>{children}</blockquote>
   ),
 };
 
@@ -432,18 +432,18 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       <div className="h-10 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-header)]/50 flex-shrink-0">
         <div className="flex items-center gap-2">
           <Sparkles size={14} className="text-purple-500" />
-          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+          <span className="text-[12px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
             Copilot
           </span>
           {backendStatus?.tools && (
-            <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
               Agent
             </span>
           )}
         </div>
         <div className="flex items-center gap-1">
           {backendStatus && (
-            <span className="px-2 py-0.5 rounded border border-[var(--border-color)] text-[9px] font-medium text-[var(--text-muted)]">
+            <span className="px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] font-medium text-[var(--text-muted)]">
               {backendStatus.providerLabel}
             </span>
           )}
@@ -462,7 +462,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         <div className="border-b border-[var(--border-color)] p-2 bg-amber-500/10">
           <div className="flex items-center gap-1.5 px-2 py-1">
             <AlertCircle size={12} className="text-amber-500 flex-shrink-0" />
-            <span className="text-[10px] text-amber-600 dark:text-amber-400">{backendError}</span>
+            <span className="text-[12px] text-amber-600 dark:text-amber-400">{backendError}</span>
           </div>
         </div>
       )}
@@ -476,21 +476,21 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 <Sparkles size={24} className="text-purple-500" />
               </div>
               <h3 className="text-sm font-bold text-[var(--text-main)] mb-1">SysML v2 Copilot</h3>
-              <p className="text-[10px] text-[var(--text-muted)] max-w-[220px] mx-auto leading-relaxed">
+              <p className="text-[12px] text-[var(--text-muted)] max-w-[280px] mx-auto leading-relaxed">
                 AI Agent 驱动 · 语法自动验证 · 代码直接同步编辑器
               </p>
-              <p className="text-[9px] text-[var(--text-muted)] mt-2">
-                输入 <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-purple-600 dark:text-purple-400 text-[8px] font-mono">/</code> 查看命令
+              <p className="text-[11px] text-[var(--text-muted)] mt-2">
+                输入 <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-purple-600 dark:text-purple-400 text-[10px] font-mono">/</code> 查看命令
               </p>
             </div>
             <div className="space-y-1.5">
-              <div className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider px-1">快速开始</div>
+              <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider px-1">快速开始</div>
               {QUICK_PROMPTS.map((qp, i) => (
                 <button key={i} onClick={() => handleSend(qp.prompt)} disabled={loading || !aiAvailable}
                   className="w-full text-left p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/50 hover:bg-purple-500/5 transition-all group disabled:opacity-50">
                   <div className="flex items-center gap-2">
                     <MessageSquare size={11} className="text-purple-500 flex-shrink-0" />
-                    <span className="text-[10px] font-medium text-[var(--text-main)] group-hover:text-purple-600 dark:group-hover:text-purple-400">{qp.label}</span>
+                    <span className="text-[12px] font-medium text-[var(--text-main)] group-hover:text-purple-600 dark:group-hover:text-purple-400">{qp.label}</span>
                   </div>
                 </button>
               ))}
@@ -509,7 +509,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 {streamingThinking.length > 0 && (
                   <div className="ml-1 space-y-0.5 border-l-2 border-purple-500/30 pl-2">
                     {streamingThinking.map((step, si) => (
-                      <div key={si} className="flex items-start gap-1.5 text-[9px] text-[var(--text-muted)]">
+                      <div key={si} className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)]">
                         <Brain size={8} className="text-purple-400 mt-0.5 flex-shrink-0" />
                         <span>{step.content}</span>
                       </div>
@@ -521,13 +521,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 {streamingToolCalls.length > 0 && (
                   <div className="space-y-1">
                     {streamingToolCalls.map((tc, ti) => (
-                      <div key={ti} className="flex items-center gap-1.5 px-2 py-1 rounded bg-[var(--bg-main)] border border-[var(--border-color)] text-[9px]">
+                      <div key={ti} className="flex items-center gap-1.5 px-2 py-1 rounded bg-[var(--bg-main)] border border-[var(--border-color)] text-[11px]">
                         <Wrench size={9} className={cn(
                           tc.status === 'running' ? 'text-blue-500 animate-spin' :
                           tc.status === 'completed' ? 'text-emerald-500' : 'text-red-500',
                         )} />
                         <span className="font-mono font-medium text-[var(--text-main)]">{tc.name}</span>
-                        {tc.result && <span className="text-[var(--text-muted)] ml-auto truncate max-w-[150px]">{tc.result}</span>}
+                        {tc.result && <span className="text-[var(--text-muted)] ml-auto truncate max-w-[220px]">{tc.result}</span>}
                       </div>
                     ))}
                   </div>
@@ -538,16 +538,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   <div className="rounded-lg p-3 bg-[var(--bg-main)] border border-[var(--border-color)]">
                     <div className="flex items-center gap-1.5 mb-1.5">
                       <Sparkles size={10} className="text-purple-500" />
-                      <span className="text-[9px] font-bold text-purple-500 uppercase">
+                      <span className="text-[11px] font-bold text-purple-500 uppercase">
                         {backendStatus?.providerLabel || 'AI'}
                       </span>
                       {streamingCodeCount > 0 && (
-                        <span className="text-[8px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium ml-auto">
+                        <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium ml-auto">
                           {streamingCodeCount} 代码块已同步
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-[var(--text-main)] leading-relaxed prose-sm">
+                    <div className="text-[13px] text-[var(--text-main)] leading-relaxed prose-sm">
                       <Markdown components={mdComponents}>{streamingContent}</Markdown>
                       <span className="inline-block w-1.5 h-3.5 bg-purple-500 animate-pulse ml-0.5 -mb-0.5 rounded-sm" />
                     </div>
@@ -555,7 +555,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 ) : (
                   <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--bg-main)] border border-[var(--border-color)]">
                     <Loader2 size={14} className="text-purple-500 animate-spin" />
-                    <span className="text-[11px] text-[var(--text-muted)]">
+                    <span className="text-[13px] text-[var(--text-muted)]">
                       {backendStatus?.providerLabel || 'AI'} 正在思考...
                     </span>
                   </div>
@@ -569,13 +569,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       {/* Slash command popup */}
       {showCommands && (
         <div className="border-t border-[var(--border-color)] bg-[var(--bg-main)] px-2 py-1">
-          <div className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 px-1">命令</div>
+          <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 px-1">命令</div>
           {SLASH_COMMANDS.map(cmd => (
             <button key={cmd.name} onClick={() => executeCommand(cmd.name)}
               className="w-full text-left px-2 py-1 rounded flex items-center gap-2 hover:bg-purple-500/10 transition-colors">
               <span className="text-purple-500">{cmd.icon}</span>
-              <span className="text-[10px] font-mono font-bold text-[var(--text-main)]">{cmd.label}</span>
-              <span className="text-[9px] text-[var(--text-muted)]">{cmd.description}</span>
+              <span className="text-[12px] font-mono font-bold text-[var(--text-main)]">{cmd.label}</span>
+              <span className="text-[13px] text-[var(--text-muted)]">{cmd.description}</span>
             </button>
           ))}
         </div>
@@ -586,14 +586,14 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         {!aiAvailable && !backendError && (
           <div className="mb-2 flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20">
             <AlertCircle size={11} className="text-amber-500 flex-shrink-0" />
-            <span className="text-[9px] text-amber-600 dark:text-amber-400">正在连接 AI 后端...</span>
+            <span className="text-[13px] text-amber-600 dark:text-amber-400">正在连接 AI 后端...</span>
           </div>
         )}
         <div className="flex items-end gap-1.5">
           <textarea ref={inputRef} value={input} onChange={handleInputChange} onKeyDown={handleKeyDown}
             placeholder={aiAvailable ? '描述您想要的模型，输入 / 查看命令...' : '等待后端连接...'}
             disabled={loading} rows={1}
-            className="flex-1 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[11px] focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 transition-all resize-none text-[var(--text-main)] placeholder:text-[var(--text-muted)] disabled:opacity-50 min-h-[36px] max-h-[120px]"
+            className="flex-1 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 transition-all resize-none text-[var(--text-main)] placeholder:text-[var(--text-muted)] disabled:opacity-50 min-h-[36px] max-h-[120px]"
             style={{ height: 'auto' }}
             onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; }}
           />
@@ -622,13 +622,13 @@ const MessageBubble: React.FC<{
       {/* Thinking (collapsed) */}
       {msg.thinkingSteps.length > 0 && (
         <details className="mb-1.5">
-          <summary className="flex items-center gap-1.5 cursor-pointer text-[9px] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors select-none">
+          <summary className="flex items-center gap-1.5 cursor-pointer text-[11px] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors select-none">
             <Brain size={9} className="text-purple-500" />
             <span className="font-medium">思考过程 ({msg.thinkingSteps.length})</span>
           </summary>
           <div className="mt-1 ml-3 space-y-0.5 border-l-2 border-purple-500/20 pl-2">
             {msg.thinkingSteps.map((step, si) => (
-              <div key={si} className="flex items-start gap-1 text-[8px] text-[var(--text-muted)]">
+              <div key={si} className="flex items-start gap-1 text-[12px] text-[var(--text-muted)]">
                 <Terminal size={7} className="text-purple-400 mt-0.5 flex-shrink-0" />
                 <span>{step.content}</span>
               </div>
@@ -641,12 +641,12 @@ const MessageBubble: React.FC<{
       {msg.toolCalls.length > 0 && (
         <div className="mb-1.5 space-y-0.5">
           {msg.toolCalls.map((tc, ti) => (
-            <div key={ti} className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[var(--bg-main)] border border-[var(--border-color)] text-[8px]">
+            <div key={ti} className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[var(--bg-main)] border border-[var(--border-color)] text-[12px]">
               {tc.status === 'completed' ? <CheckCircle size={8} className="text-emerald-500 flex-shrink-0" /> :
                tc.status === 'error' ? <XCircle size={8} className="text-red-500 flex-shrink-0" /> :
                <Wrench size={8} className="text-blue-500 flex-shrink-0" />}
               <span className="font-mono font-medium text-[var(--text-main)]">{tc.name}</span>
-              {tc.result && <span className="text-[var(--text-muted)] ml-auto truncate max-w-[150px]">{tc.result}</span>}
+              {tc.result && <span className="text-[var(--text-muted)] ml-auto truncate max-w-[220px]">{tc.result}</span>}
             </div>
           ))}
         </div>
@@ -662,17 +662,17 @@ const MessageBubble: React.FC<{
         {/* Role label */}
         <div className="flex items-center gap-1.5 mb-1">
           {msg.role === 'user' ? (
-            <span className="text-[8px] font-bold text-blue-500 uppercase">You</span>
+            <span className="text-[10px] font-bold text-blue-500 uppercase">You</span>
           ) : msg.role === 'error' ? (
-            <><AlertCircle size={9} className="text-red-500" /><span className="text-[8px] font-bold text-red-500 uppercase">Error</span></>
+            <><AlertCircle size={9} className="text-red-500" /><span className="text-[10px] font-bold text-red-500 uppercase">Error</span></>
           ) : msg.role === 'system' ? (
-            <><Terminal size={9} className="text-[var(--text-muted)]" /><span className="text-[8px] font-bold text-[var(--text-muted)] uppercase">System</span></>
+            <><Terminal size={9} className="text-[var(--text-muted)]" /><span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">System</span></>
           ) : (
             <>
               <Sparkles size={9} className="text-purple-500" />
-              <span className="text-[8px] font-bold text-purple-500 uppercase">{msg.provider || 'Copilot'}</span>
+              <span className="text-[10px] font-bold text-purple-500 uppercase">{msg.provider || 'Copilot'}</span>
               {msg.codesSynced > 0 && (
-                <span className="text-[7px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium ml-auto flex items-center gap-0.5">
+                <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium ml-auto flex items-center gap-0.5">
                   <CheckCircle size={7} /> {msg.codesSynced} 已同步
                 </span>
               )}
@@ -681,7 +681,7 @@ const MessageBubble: React.FC<{
         </div>
 
         {/* Content */}
-        <div className="text-[11px] text-[var(--text-main)] leading-relaxed">
+        <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
           {msg.role === 'user' || msg.role === 'system' || msg.role === 'error' ? (
             <span className="whitespace-pre-wrap break-words">{msg.content}</span>
           ) : (
