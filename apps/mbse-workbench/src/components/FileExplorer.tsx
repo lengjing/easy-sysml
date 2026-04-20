@@ -218,7 +218,14 @@ function FileContextMenu({
 
   const parentForNew = state.nodeType === 'directory' ? state.nodeId : state.parentId;
 
-  const items = [
+  interface ContextMenuItem {
+    icon: typeof FilePlus;
+    label: string;
+    action: () => void;
+    danger?: boolean;
+  }
+
+  const items: ContextMenuItem[] = [
     { icon: FilePlus, label: '新建文件', action: () => onNewFile(parentForNew) },
     { icon: FolderPlus, label: '新建文件夹', action: () => onNewFolder(parentForNew) },
     ...(state.nodeId
@@ -241,7 +248,7 @@ function FileContextMenu({
           onClick={() => { item.action(); onClose(); }}
           className={cn(
             'flex items-center gap-2 w-full px-3 py-1.5 text-[11px] transition-colors text-left',
-            (item as any).danger
+            item.danger
               ? 'text-red-500 hover:bg-red-500/10'
               : 'text-[var(--text-main)] hover:bg-[var(--border-color)]',
           )}

@@ -351,14 +351,11 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
     if (!docOpenRef.current) return;
     const client = getClient();
 
-    // If the URI changed, close the old and open the new
+    // If the URI changed, open the new document in the LSP server.
+    // didOpen is idempotent — if already open, it sends didChange instead.
     if (prevUriRef.current && prevUriRef.current !== currentUri) {
-      // Don't close the old document — keep it open in the LSP server for
-      // cross-file references. Just open the new one if not already open.
-      client.didOpen(currentUri, value).catch(() => {
-        // May already be open — that's fine, send a change instead
-        client.didChange(currentUri, value);
-      });
+      // Keep old documents open in the server for cross-file references.
+      client.didOpen(currentUri, value);
       prevUriRef.current = currentUri;
     }
   }, [currentUri, value]);

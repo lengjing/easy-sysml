@@ -105,17 +105,17 @@ export function useFileSystem(): UseFileSystemReturn {
   }, []);
 
   const closeTab = useCallback((fileId: string) => {
+    let remainingTabs: OpenTab[] = [];
     setOpenTabs(prev => {
-      const next = prev.filter(t => t.fileId !== fileId);
-      return next;
+      remainingTabs = prev.filter(t => t.fileId !== fileId);
+      return remainingTabs;
     });
     setActiveFileId(prev => {
       if (prev !== fileId) return prev;
-      // Select an adjacent tab
-      const tabs = openTabs.filter(t => t.fileId !== fileId);
-      return tabs.length > 0 ? tabs[tabs.length - 1].fileId : null;
+      // Select an adjacent tab from the updated list
+      return remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1].fileId : null;
     });
-  }, [openTabs]);
+  }, []);
 
   const updateFileContent = useCallback((fileId: string, content: string) => {
     fs.updateContent(fileId, content);
@@ -159,18 +159,21 @@ export function useFileSystem(): UseFileSystemReturn {
       };
       collect(id);
 
-      setOpenTabs(prev => prev.filter(t => !toClose.has(t.fileId)));
+      let remainingTabs: OpenTab[] = [];
+      setOpenTabs(prev => {
+        remainingTabs = prev.filter(t => !toClose.has(t.fileId));
+        return remainingTabs;
+      });
       setActiveFileId(prev => {
         if (prev && toClose.has(prev)) {
-          const remaining = openTabs.filter(t => !toClose.has(t.fileId));
-          return remaining.length > 0 ? remaining[remaining.length - 1].fileId : null;
+          return remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1].fileId : null;
         }
         return prev;
       });
 
       fs.delete(id);
     },
-    [fs, openTabs],
+    [fs],
   );
 
   const moveNode = useCallback(
