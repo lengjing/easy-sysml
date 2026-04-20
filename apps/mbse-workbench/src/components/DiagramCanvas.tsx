@@ -223,30 +223,30 @@ const DiagramCanvasInner = forwardRef<DiagramCanvasHandle, DiagramCanvasProps>(
           panActivationKeyCode={null}
           fitView
         >
-          <Background color="#cbd5e1" gap={20} size={1} />
-          <Controls className="!bg-white !border-slate-300 !shadow-sm" />
+          <Background color="var(--border-color)" gap={20} size={1} />
+          <Controls className="!bg-[var(--bg-sidebar)] !border-[var(--border-color)] !shadow-sm" />
         </ReactFlow>
 
         {contextMenu && (
           <div
-            className="fixed z-[100] bg-white border border-slate-300 shadow-xl rounded-md py-1 min-w-[160px] text-xs"
+            className="fixed z-[100] bg-[var(--bg-sidebar)] border border-[var(--border-color)] shadow-xl rounded-md py-1 min-w-[160px] text-xs"
             style={{ top: contextMenu.y, left: contextMenu.x }}
           >
             <button
               onClick={() => handleCreateChild(contextMenu.nodeId)}
-              className="w-full text-left px-3 py-2 hover:bg-indigo-50 flex items-center gap-2 text-slate-700"
+              className="w-full text-left px-3 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950 flex items-center gap-2 text-[var(--text-main)]"
             >
               <Plus className="w-3.5 h-3.5 text-indigo-500" />
               Create Child Element
             </button>
             <button
               onClick={() => handleDeleteNode(contextMenu.nodeId)}
-              className="w-full text-left px-3 py-2 hover:bg-rose-50 flex items-center gap-2 text-rose-600 border-t border-slate-100"
+              className="w-full text-left px-3 py-2 hover:bg-rose-50 dark:hover:bg-rose-950 flex items-center gap-2 text-rose-600 dark:text-rose-400 border-t border-[var(--border-color)]"
             >
               <AlertCircle className="w-3.5 h-3.5" />
               Delete Element
             </button>
-            <div className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase border-t border-slate-100">
+            <div className="px-3 py-1.5 text-[9px] font-bold text-[var(--text-muted)] uppercase border-t border-[var(--border-color)]">
               ID: {contextMenu.nodeId}
             </div>
           </div>
