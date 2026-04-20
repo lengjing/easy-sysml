@@ -98,8 +98,12 @@ export function createModel(provider: AIProvider): LanguageModel {
     return google(modelId);
   }
 
-  // DeepSeek, Qwen, OpenAI — all use OpenAI-compatible API
+  // DeepSeek, Qwen, OpenAI — all use OpenAI Chat Completions API.
+  // Must use `.chat()` explicitly: the default `openai()` in @ai-sdk/openai v3
+  // dispatches to the Responses API (/responses), which only OpenAI supports.
+  // DeepSeek, Qwen, and other OpenAI-compatible providers only support
+  // the Chat Completions endpoint (/chat/completions).
   const baseURL = process.env.AI_BASE_URL || preset.baseURL;
   const openai = createOpenAI({ apiKey, baseURL });
-  return openai(modelId);
+  return openai.chat(modelId);
 }
