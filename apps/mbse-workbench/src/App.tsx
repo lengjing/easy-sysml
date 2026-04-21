@@ -119,14 +119,16 @@ function WorkbenchContent() {
         projects={projects}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        theme={theme}
-        toggleTheme={toggleTheme}
         onSwitchProject={switchProject}
         onCreateProject={createProject}
+        leftPanelVisible={leftPanelVisible}
+        setLeftPanelVisible={setLeftPanelVisible}
+        rightPanelVisible={rightPanelVisible}
+        setRightPanelVisible={setRightPanelVisible}
       />
 
       <main className="flex flex-1 overflow-hidden relative">
-        <ActivityBar activeTab={activeTab} setActiveTab={setActiveTab} />
+        <ActivityBar activeTab={activeTab} setActiveTab={setActiveTab} theme={theme} toggleTheme={toggleTheme} />
 
         <AnimatePresence initial={false}>
           {leftPanelVisible && (
@@ -151,10 +153,6 @@ function WorkbenchContent() {
 
         <section className="flex-1 flex flex-col bg-[var(--bg-canvas)] relative transition-colors duration-200">
           <Toolbar
-            leftPanelVisible={leftPanelVisible}
-            setLeftPanelVisible={setLeftPanelVisible}
-            rightPanelVisible={rightPanelVisible}
-            setRightPanelVisible={setRightPanelVisible}
             showCode={showCode}
             setShowCode={setShowCode}
             showAI={showAI}

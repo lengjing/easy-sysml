@@ -7,12 +7,11 @@ import {
   Network,
   Play,
   FileText,
-  Sun,
-  Moon,
-  Settings,
   FolderOpen,
   Plus,
   Check,
+  PanelLeft,
+  PanelRight,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { ProjectMeta } from '../lib/virtual-fs';
@@ -22,10 +21,13 @@ interface HeaderProps {
   projects: ProjectMeta[];
   activeTab: string;
   setActiveTab: (tab: any) => void;
-  theme: 'dark' | 'light';
-  toggleTheme: () => void;
   onSwitchProject: (id: string) => void;
   onCreateProject: (name: string) => void;
+  /** Panel visibility controls — moved here from Toolbar */
+  leftPanelVisible: boolean;
+  setLeftPanelVisible: (v: boolean) => void;
+  rightPanelVisible: boolean;
+  setRightPanelVisible: (v: boolean) => void;
 }
 
 /** Milliseconds to wait before focusing the new-project input (allows DOM to settle). */
@@ -36,10 +38,12 @@ export const Header = ({
   projects,
   activeTab,
   setActiveTab,
-  theme,
-  toggleTheme,
   onSwitchProject,
   onCreateProject,
+  leftPanelVisible,
+  setLeftPanelVisible,
+  rightPanelVisible,
+  setRightPanelVisible,
 }: HeaderProps) => {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [showNewProjectInput, setShowNewProjectInput] = useState(false);
@@ -91,27 +95,25 @@ export const Header = ({
   };
 
   return (
-    <header className="h-11 border-b border-[var(--border-color)] flex items-center justify-between px-4 bg-[var(--bg-header)] z-50 transition-colors duration-200 flex-shrink-0">
-      {/* Left: Logo + Project Selector */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
+    <header className="h-11 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-header)] z-50 transition-colors duration-200 flex-shrink-0">
+      {/* ── Left: Logo + Project Selector ── */}
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <div className="w-7 h-7 bg-blue-600 rounded flex items-center justify-center">
             <Box className="text-white w-4 h-4" />
           </div>
-          <div className="flex flex-col leading-none">
-            <span className="font-bold text-[13px] tracking-tight">
-              MBSE <span className="text-blue-500">Workbench</span>
-            </span>
-          </div>
+          <span className="font-bold text-[13px] tracking-tight whitespace-nowrap">
+            MBSE <span className="text-blue-500">Workbench</span>
+          </span>
         </div>
 
-        <div className="h-5 w-px bg-[var(--border-color)]" />
+        <div className="h-5 w-px bg-[var(--border-color)] flex-shrink-0" />
 
         {/* Project Selector Dropdown */}
-        <div className="relative" ref={menuRef}>
+        <div className="relative flex-shrink-0" ref={menuRef}>
           <button
             onClick={() => setProjectMenuOpen(v => !v)}
-            className="flex items-center gap-1.5 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded px-2 py-1 text-xs font-medium text-[var(--text-main)] hover:border-blue-500/60 transition-colors max-w-[200px]"
+            className="flex items-center gap-1.5 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded px-2 py-1 text-xs font-medium text-[var(--text-main)] hover:border-blue-500/60 transition-colors max-w-[180px]"
           >
             <Database size={13} className="text-blue-400 flex-shrink-0" />
             <span className="truncate">{activeProject?.name ?? '选择项目'}</span>
@@ -176,12 +178,12 @@ export const Header = ({
         </div>
       </div>
 
-      {/* Center: Navigation Tabs */}
-      <nav className="flex items-center gap-1 bg-[var(--bg-sidebar)] p-1 rounded-lg border border-[var(--border-color)]">
+      {/* ── Center: Module Navigation Tabs ── */}
+      <nav className="flex items-center gap-1 bg-[var(--bg-sidebar)] p-1 rounded-lg border border-[var(--border-color)] flex-shrink-0">
         {[
-          { id: 'modeling',     label: '建模设计', icon: Layers  },
+          { id: 'modeling',     label: '建模设计', icon: Layers   },
           { id: 'traceability', label: '需求追溯', icon: Network  },
-          { id: 'simulation',   label: '行为仿真', icon: Play    },
+          { id: 'simulation',   label: '行为仿真', icon: Play     },
           { id: 'reports',      label: '文档报告', icon: FileText },
         ].map(tab => (
           <button
@@ -200,23 +202,33 @@ export const Header = ({
         ))}
       </nav>
 
-      {/* Right: Theme + Settings */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={toggleTheme}
-          className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--border-color)] rounded-md transition-colors"
-          title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
-        >
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-        <button
-          className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--border-color)] rounded-md transition-colors"
-          title="设置"
-        >
-          <Settings size={16} />
-        </button>
-        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-[10px] font-bold border border-[var(--border-color)] cursor-pointer hover:ring-2 hover:ring-blue-500/50 transition-all text-white">
-          JS
+      {/* ── Right: Panel toggles ── */}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-0.5 bg-[var(--bg-sidebar)] rounded border border-[var(--border-color)] p-0.5">
+          <button
+            onClick={() => setLeftPanelVisible(!leftPanelVisible)}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              leftPanelVisible
+                ? 'text-blue-500 bg-blue-500/10'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-main)]',
+            )}
+            title={leftPanelVisible ? '收起左侧面板' : '展开左侧面板'}
+          >
+            <PanelLeft size={15} />
+          </button>
+          <button
+            onClick={() => setRightPanelVisible(!rightPanelVisible)}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              rightPanelVisible
+                ? 'text-blue-500 bg-blue-500/10'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-main)]',
+            )}
+            title={rightPanelVisible ? '收起右侧面板' : '展开右侧面板'}
+          >
+            <PanelRight size={15} />
+          </button>
         </div>
       </div>
     </header>
