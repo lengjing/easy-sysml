@@ -35,6 +35,11 @@ export const ActivityBar = ({ activeTab, setActiveTab, theme, toggleTheme }: Act
     return () => document.removeEventListener('mousedown', handler);
   }, [settingsOpen]);
 
+  const handleThemeToggle = () => {
+    toggleTheme();
+    setSettingsOpen(false);
+  };
+
   const topIcons = [
     { id: 'modeling',     icon: Files,   label: '资源管理器' },
     { id: 'search',       icon: Search,  label: '搜索'       },
@@ -110,7 +115,7 @@ export const ActivityBar = ({ activeTab, setActiveTab, theme, toggleTheme }: Act
               </div>
               {/* Theme toggle */}
               <button
-                onClick={() => { toggleTheme(); setSettingsOpen(false); }}
+                onClick={handleThemeToggle}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-[var(--text-main)] hover:bg-[var(--border-color)] transition-colors"
               >
                 {theme === 'dark'

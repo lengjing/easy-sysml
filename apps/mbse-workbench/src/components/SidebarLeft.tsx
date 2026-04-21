@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import {
-  Search, Box, FileText, Info, Layers,
+  Search, Settings, Box, FileText, Info, Layers,
   Table as TableIcon, Zap, Network, Activity, Package,
   Circle, Link2, Database, ShieldCheck,
   Component, ArrowRightCircle, ShieldAlert, Target,
   Cpu, Eye, Inbox, CheckSquare,
   Files, GitBranch,
 } from 'lucide-react';
+import { cn } from '../lib/utils';
 import { TreeItem } from './TreeItem';
 import { ContextMenu } from './ContextMenu';
 import { FileExplorer } from './FileExplorer';
@@ -358,7 +359,7 @@ export const SidebarLeft = ({
               {/* Model tree toggle */}
               <button
                 onClick={() => setSidebarView('model')}
-                className={`p-1 rounded transition-colors ${sidebarView === 'model' ? 'bg-blue-500/15 text-blue-500' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+                className={cn('p-1 rounded transition-colors', sidebarView === 'model' ? 'bg-blue-500/15 text-blue-500' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]')}
                 title="模型树"
               >
                 <GitBranch size={13} />
@@ -366,7 +367,7 @@ export const SidebarLeft = ({
               {/* File tree toggle */}
               <button
                 onClick={() => setSidebarView('files')}
-                className={`p-1 rounded transition-colors ${sidebarView === 'files' ? 'bg-blue-500/15 text-blue-500' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+                className={cn('p-1 rounded transition-colors', sidebarView === 'files' ? 'bg-blue-500/15 text-blue-500' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]')}
                 title="文件树"
               >
                 <Files size={13} />

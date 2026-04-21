@@ -181,9 +181,9 @@ export const Header = ({
       {/* ── Center: Module Navigation Tabs ── */}
       <nav className="flex items-center gap-1 bg-[var(--bg-sidebar)] p-1 rounded-lg border border-[var(--border-color)] flex-shrink-0">
         {[
-          { id: 'modeling',     label: '建模设计', icon: Layers   },
-          { id: 'traceability', label: '需求追溯', icon: Network  },
-          { id: 'simulation',   label: '行为仿真', icon: Play     },
+          { id: 'modeling',     label: '建模设计', icon: Layers },
+          { id: 'traceability', label: '需求追溯', icon: Network },
+          { id: 'simulation',   label: '行为仿真', icon: Play },
           { id: 'reports',      label: '文档报告', icon: FileText },
         ].map(tab => (
           <button

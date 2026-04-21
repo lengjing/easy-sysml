@@ -74,10 +74,10 @@ export const Toolbar = ({
         <div className="h-4 w-px bg-[var(--border-color)] mx-1" />
 
         <div className="flex items-center gap-0.5 text-[var(--text-muted)]">
-          <button className="p-1 hover:text-[var(--text-main)] hover:bg-[var(--border-color)] rounded transition-colors" title="撤销 (Ctrl+Z)">
+          <button className="p-1 hover:text-[var(--text-main)] hover:bg-[var(--border-color)] rounded transition-colors" title="撤销 (Ctrl+Z)" aria-label="撤销">
             <Undo2 size={13} />
           </button>
-          <button className="p-1 hover:text-[var(--text-main)] hover:bg-[var(--border-color)] rounded transition-colors" title="重做 (Ctrl+Y)">
+          <button className="p-1 hover:text-[var(--text-main)] hover:bg-[var(--border-color)] rounded transition-colors" title="重做 (Ctrl+Y)" aria-label="重做">
             <Redo2 size={13} />
           </button>
         </div>
