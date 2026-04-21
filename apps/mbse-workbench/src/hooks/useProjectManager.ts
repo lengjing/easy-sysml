@@ -45,7 +45,7 @@ export function useProjectManager(): UseProjectManagerReturn {
       setProjects(list);
 
       let activeId = await getActiveProjectId();
-      if (!activeId || !list.find(p => p.id === activeId)) {
+      if (!activeId || !list.some(p => p.id === activeId)) {
         activeId = list[0]?.id;
         if (activeId) await setActiveProjectId(activeId);
       }

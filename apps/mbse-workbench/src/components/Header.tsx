@@ -28,6 +28,9 @@ interface HeaderProps {
   onCreateProject: (name: string) => void;
 }
 
+/** Milliseconds to wait before focusing the new-project input (allows DOM to settle). */
+const FOCUS_DELAY_MS = 50;
+
 export const Header = ({
   activeProject,
   projects,
@@ -61,7 +64,7 @@ export const Header = ({
   /* Focus the new-project input when it appears */
   useEffect(() => {
     if (showNewProjectInput) {
-      setTimeout(() => inputRef.current?.focus(), 50);
+      setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS);
     }
   }, [showNewProjectInput]);
 

@@ -112,9 +112,13 @@ async function idbDelete(key: string): Promise<void> {
 /*  Project registry helpers                                          */
 /* ------------------------------------------------------------------ */
 
-/** Generate a unique project id. */
+/** Generate a unique project id using the Web Crypto API. */
 function generateProjectId(): string {
-  return `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `p-${crypto.randomUUID()}`;
+  }
+  // Fallback for environments without crypto.randomUUID
+  return `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 /** Load the list of all projects. */
@@ -203,14 +207,16 @@ export function generateId(): string {
   return `f-${Date.now()}-${++_idCounter}`;
 }
 
+/** Maximum characters to use from a project name as a folder name. */
+const MAX_FOLDER_NAME_LENGTH = 30;
+
 export function createDefaultWorkspace(projectName?: string): FileNode[] {
   const now = Date.now();
   const rootId = generateId();
   const mainId = generateId();
   const subsystemId = generateId();
-  // Derive a safe folder name from the project name (or use default)
   const folderName = projectName
-    ? projectName.replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '_').slice(0, 30)
+    ? projectName.replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '_').slice(0, MAX_FOLDER_NAME_LENGTH)
     : 'UAV_System';
 
   return [
