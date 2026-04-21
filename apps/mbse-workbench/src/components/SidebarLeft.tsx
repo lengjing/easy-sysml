@@ -9,8 +9,10 @@ import {
 } from 'lucide-react';
 import { TreeItem } from './TreeItem';
 import { ContextMenu } from './ContextMenu';
+import { FileExplorer } from './FileExplorer';
 import type { DomainModel, DomainElement } from './editor/sysml-domain-model';
 import type { SimpleElement } from './DiagramCanvas';
+import type { FileNode } from '../lib/virtual-fs';
 
 interface SidebarLeftProps {
   visible: boolean;
@@ -19,6 +21,22 @@ interface SidebarLeftProps {
   onDropElement?: (draggedId: string, targetId: string) => void;
   nodes: SimpleElement[];
   domainModel?: DomainModel | null;
+  /** File system nodes for the file explorer. */
+  fsNodes?: FileNode[];
+  /** Active file id. */
+  activeFileId?: string | null;
+  /** Get children of a file node. */
+  getChildren?: (parentId: string | null) => FileNode[];
+  /** Open a file in the editor. */
+  onOpenFile?: (fileId: string) => void;
+  /** Create a new file. */
+  onCreateFile?: (name: string, parentId: string | null) => void;
+  /** Create a new directory. */
+  onCreateDirectory?: (name: string, parentId: string | null) => void;
+  /** Rename a node. */
+  onRenameNode?: (id: string, newName: string) => void;
+  /** Delete a node. */
+  onDeleteNode?: (id: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -152,8 +170,18 @@ export const SidebarLeft = ({
   onDropElement,
   nodes,
   domainModel,
+  fsNodes,
+  activeFileId,
+  getChildren: getFileChildren,
+  onOpenFile,
+  onCreateFile,
+  onCreateDirectory,
+  onRenameNode,
+  onDeleteNode,
 }: SidebarLeftProps) => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Toggle between 'model' and 'files' sidebar view. */
+  const [sidebarView, setSidebarView] = useState<'model' | 'files'>('model');
 
   if (!visible) return null;
 
@@ -312,15 +340,40 @@ export const SidebarLeft = ({
         </div>
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-            {activeTab === 'search' ? '搜索' : activeTab === 'database' ? '模型库' : '模型浏览器'}
+            {activeTab === 'search' ? '搜索' : activeTab === 'database' ? '模型库' : sidebarView === 'files' ? '文件资源管理器' : '模型浏览器'}
           </span>
           <div className="flex gap-1">
+            {activeTab === 'modeling' && (
+              <button
+                className={`p-1 rounded text-[var(--text-muted)] transition-colors ${sidebarView === 'files' ? 'bg-blue-500/10 text-blue-500' : 'hover:bg-[var(--border-color)]'}`}
+                title={sidebarView === 'files' ? '切换到模型树' : '切换到文件管理'}
+                onClick={() => setSidebarView(sidebarView === 'files' ? 'model' : 'files')}
+              >
+                <FileText size={14} />
+              </button>
+            )}
             <button className="p-1 hover:bg-[var(--border-color)] rounded text-[var(--text-muted)]" title="过滤"><Settings size={14} /></button>
           </div>
         </div>
       </div>
 
-      {renderContent()}
+      {/* File Explorer view */}
+      {sidebarView === 'files' && activeTab === 'modeling' && fsNodes && getFileChildren && onOpenFile && onCreateFile && onCreateDirectory && onRenameNode && onDeleteNode ? (
+        <FileExplorer
+          nodes={fsNodes}
+          activeFileId={activeFileId ?? null}
+          getChildren={getFileChildren}
+          onOpenFile={onOpenFile}
+          onCreateFile={onCreateFile}
+          onCreateDirectory={onCreateDirectory}
+          onRename={onRenameNode}
+          onDelete={onDeleteNode}
+        />
+      ) : (
+        <>
+          {renderContent()}
+        </>
+      )}
 
       {contextMenu && (
         <ContextMenu 

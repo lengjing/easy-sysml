@@ -17,6 +17,7 @@ import { SysMLEditorPanel } from './components/SysMLEditorPanel';
 import { TraceabilityMatrix } from './components/TraceabilityMatrix';
 import { AIChatPanel } from './components/ai/AIChatPanel';
 import { useSysMLParser } from './hooks/useSysMLParser';
+import { useFileSystem } from './hooks/useFileSystem';
 
 function WorkbenchContent() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
@@ -37,16 +38,40 @@ function WorkbenchContent() {
     }))
   );
 
-  const [kermlCode, setKermlCode] = useState(`package UAV_System {
-    part def Control_Subsystem {
-        doc /* Executes complex flight control algorithms. */
-        attribute frequency : String;
+  // Multi-file system
+  const {
+    ready: fsReady,
+    nodes: fsNodes,
+    openTabs,
+    activeFileId,
+    activeFileContent,
+    activeFile,
+    openFile,
+    closeTab,
+    setActiveFile,
+    updateFileContent,
+    createFile,
+    createDirectory,
+    renameNode,
+    deleteNode,
+    moveNode,
+    getChildren,
+    getPath,
+    getUri,
+    fs,
+  } = useFileSystem();
+
+  // Derive the editor code from the active file
+  const kermlCode = activeFileContent;
+
+  const setKermlCode = useCallback((code: string) => {
+    if (activeFileId) {
+      updateFileContent(activeFileId, code);
     }
-    part def Power_Subsystem {
-        doc /* Provides regulated power to all avionics. */
-        attribute voltage : String;
-    }
-}`);
+  }, [activeFileId, updateFileContent]);
+
+  // Get current file URI for LSP
+  const currentFileUri = activeFileId ? getUri(activeFileId) : undefined;
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -72,7 +97,8 @@ function WorkbenchContent() {
   const handleApplyAICode = useCallback((code: string) => {
     setKermlCode(code);
     setShowCode(true);
-  }, []);
+  }, [setKermlCode]);
+
   const addNewElement = useCallback((type: string = 'Block') => {
     canvasRef.current?.addNode(type);
   }, []);
@@ -85,6 +111,12 @@ function WorkbenchContent() {
   const handleStructureChange = useCallback((els: SimpleElement[]) => {
     setElements(els);
   }, []);
+
+  // Helper: get file name for tab display
+  const getFileName = useCallback((fileId: string) => {
+    const node = fs.getNode(fileId);
+    return node?.name ?? 'untitled';
+  }, [fs]);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans overflow-hidden transition-colors duration-200">
@@ -108,6 +140,14 @@ function WorkbenchContent() {
               onDropElement={handleDropElement}
               nodes={elements}
               domainModel={domainModel}
+              fsNodes={fsNodes}
+              activeFileId={activeFileId}
+              getChildren={getChildren}
+              onOpenFile={(fileId) => { openFile(fileId); setShowCode(true); }}
+              onCreateFile={(name, parentId) => { createFile(name, parentId); setShowCode(true); }}
+              onCreateDirectory={createDirectory}
+              onRenameNode={renameNode}
+              onDeleteNode={deleteNode}
             />
           )}
         </AnimatePresence>
@@ -141,6 +181,12 @@ function WorkbenchContent() {
                   setCode={setKermlCode}
                   onDocumentSymbols={handleDocumentSymbols}
                   visible={showCode}
+                  openTabs={openTabs}
+                  activeFileId={activeFileId}
+                  onSelectTab={(fileId) => setActiveFile(fileId)}
+                  onCloseTab={closeTab}
+                  getFileName={getFileName}
+                  fileUri={currentFileUri}
                 />
 
                 {/* AI Chat Panel */}
@@ -168,7 +214,7 @@ function WorkbenchContent() {
             )}
           </div>
 
-          <StatusBar />
+          <StatusBar activeFileName={activeFile?.name} />
         </section>
 
         <AnimatePresence initial={false}>
