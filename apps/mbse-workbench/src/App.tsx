@@ -4,8 +4,6 @@ import { AnimatePresence } from 'motion/react';
 import { Box } from 'lucide-react';
 
 import { cn } from './lib/utils';
-import { Project } from './types';
-import { initialProject } from './data/initialProject';
 import { DiagramCanvas, DiagramCanvasHandle, SimpleElement } from './components/DiagramCanvas';
 import { Header } from './components/Header';
 import { SidebarLeft } from './components/SidebarLeft';
@@ -18,27 +16,23 @@ import { TraceabilityMatrix } from './components/TraceabilityMatrix';
 import { AIChatPanel } from './components/ai/AIChatPanel';
 import { useSysMLParser } from './hooks/useSysMLParser';
 import { useFileSystem } from './hooks/useFileSystem';
+import { useProjectManager } from './hooks/useProjectManager';
 
 function WorkbenchContent() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [project] = useState<Project>(initialProject);
   const [activeTab, setActiveTab] = useState<'modeling' | 'traceability' | 'simulation' | 'reports' | 'search' | 'database'>('modeling');
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const [showCode, setShowCode] = useState(false);
   const [showAI, setShowAI] = useState(false);
 
-  // Structural element list for sidebar (no positions — only updated on add/remove)
-  const [elements, setElements] = useState<SimpleElement[]>(() =>
-    initialProject.diagrams[0].nodes.map(n => ({
-      id: n.id,
-      label: (n.data as any).label ?? '',
-      type: (n.data as any).type ?? '',
-      parentNode: n.parentNode,
-    }))
-  );
+  // Project management
+  const { projects, activeProject, activeProjectId, ready: projectsReady, createProject, switchProject } = useProjectManager();
 
-  // Multi-file system
+  // Structural element list for sidebar (no positions — only updated on add/remove)
+  const [elements, setElements] = useState<SimpleElement[]>([]);
+
+  // Multi-file system — reload when active project changes
   const {
     ready: fsReady,
     nodes: fsNodes,
@@ -59,7 +53,7 @@ function WorkbenchContent() {
     getPath,
     getUri,
     fs,
-  } = useFileSystem();
+  } = useFileSystem(projectsReady ? activeProjectId : undefined);
 
   // Derive the editor code from the active file
   const kermlCode = activeFileContent;
@@ -121,11 +115,14 @@ function WorkbenchContent() {
   return (
     <div className="flex flex-col h-screen w-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans overflow-hidden transition-colors duration-200">
       <Header
-        project={project}
+        activeProject={activeProject}
+        projects={projects}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         theme={theme}
         toggleTheme={toggleTheme}
+        onSwitchProject={switchProject}
+        onCreateProject={createProject}
       />
 
       <main className="flex flex-1 overflow-hidden relative">

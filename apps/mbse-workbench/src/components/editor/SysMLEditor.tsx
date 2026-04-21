@@ -393,6 +393,7 @@ export const SysMLEditor: React.FC<SysMLEditorProps> = ({
       <Editor
         language={SYSML_LANGUAGE_ID}
         value={value}
+        path={currentUri}
         onChange={handleChange}
         beforeMount={handleBeforeMount}
         onMount={handleMount}
