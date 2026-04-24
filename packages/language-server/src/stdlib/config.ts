@@ -105,7 +105,7 @@ export const STDLIB_DEPENDENCY_LAYERS: readonly string[][] = [
   // Layer 21: Views
   ['Views.sysml', 'StandardViewDefinitions.sysml'],
 
-  // Layer 21b: Aspect view definitions (depends on StandardViewDefinitions)
+  // Layer 22: Aspect view definitions (depends on StandardViewDefinitions)
   ['AspectViewDefinitions.sysml'],
 
   // Layer 23: SysML aggregation

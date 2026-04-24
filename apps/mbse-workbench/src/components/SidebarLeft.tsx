@@ -330,17 +330,17 @@ export const SidebarLeft = ({
             </TreeItem>
             {/* ASPECT Views */}
             <TreeItem label="ASPECT 视图" icon={Layers} isOpen={true} onContextMenu={handleContextMenu}>
-              <TreeItem label="Functional" icon={Zap} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="Logical" icon={Layers} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="Physical" icon={Box} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="ICD" icon={Link2} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="Parameter" icon={Settings} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="Hardware" icon={Cpu} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="Critical" icon={ShieldAlert} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="SystemsFunctional" icon={Zap} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="LRUFunction" icon={Component} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="ComponentItem" icon={Box} isLeaf onContextMenu={handleContextMenu} />
-              <TreeItem label="FunctionCircuit" icon={Cpu} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="功能视图 (Functional)" icon={Zap} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="逻辑视图 (Logical)" icon={Layers} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="物理视图 (Physical)" icon={Box} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="接口控制文档视图 (ICD)" icon={Link2} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="参数视图 (Parameter)" icon={Settings} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="硬件视图 (Hardware)" icon={Cpu} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="关键项视图 (Critical)" icon={ShieldAlert} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="系统功能视图 (SystemsFunctional)" icon={Zap} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="LRU功能视图 (LRUFunction)" icon={Component} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="组件项视图 (ComponentItem)" icon={Box} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="功能电路视图 (FunctionCircuit)" icon={Cpu} isLeaf onContextMenu={handleContextMenu} />
             </TreeItem>
           </TreeItem>
 
