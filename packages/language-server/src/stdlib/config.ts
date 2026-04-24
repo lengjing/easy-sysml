@@ -1,13 +1,13 @@
 /**
  * Standard Library Configuration
  *
- * Single source of truth for the 94 SysML v2 / KerML stdlib files
+ * Single source of truth for the 95 SysML v2 / KerML stdlib files
  * and their dependency ordering.
  *
  * Files are organized in dependency layers:
  * - KerML foundation (layers 1-11): 36 files
- * - SysML core (layers 12-22): 21 files
- * - Domain libraries (layers 23-36): 37 files
+ * - SysML core (layers 12-23): 22 files
+ * - Domain libraries (layers 24-40): 37 files
  *
  * Within a layer, files can be loaded in parallel.
  * Layers must be loaded sequentially.
@@ -105,7 +105,10 @@ export const STDLIB_DEPENDENCY_LAYERS: readonly string[][] = [
   // Layer 21: Views
   ['Views.sysml', 'StandardViewDefinitions.sysml'],
 
-  // Layer 22: SysML aggregation
+  // Layer 21b: Aspect view definitions (depends on StandardViewDefinitions)
+  ['AspectViewDefinitions.sysml'],
+
+  // Layer 23: SysML aggregation
   ['SysML.sysml'],
 
   // ===== DOMAIN LIBRARIES (37 files) =====

@@ -19,7 +19,7 @@ describe('stdlib loader', () => {
     const files = fs.readdirSync(stdlibPath!);
     const sysmlFiles = files.filter((f) => f.endsWith('.sysml') || f.endsWith('.kerml'));
 
-    expect(sysmlFiles.length).toBe(94);
+    expect(sysmlFiles.length).toBe(95);
   });
 
   it('Base.kerml is a valid KerML file', () => {
