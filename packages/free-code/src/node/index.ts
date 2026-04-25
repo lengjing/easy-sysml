@@ -16,7 +16,7 @@
  *
  * // Standalone tool usage
  * const { output } = await runBash({ command: 'git log --oneline -5' })
- * const files = await globSearch({ pattern: '**\/*.ts' })
+ * const files = await globSearch({ pattern: '**/*.ts' })
  * ```
  */
 
