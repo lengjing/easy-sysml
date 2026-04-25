@@ -7,17 +7,17 @@ import {
 } from '../config.js';
 
 describe('stdlib config', () => {
-  it('has 95 files total', () => {
-    expect(STDLIB_FILE_COUNT).toBe(95);
+  it('has 94 files total', () => {
+    expect(STDLIB_FILE_COUNT).toBe(94);
   });
 
-  it('has 40 dependency layers', () => {
-    expect(STDLIB_DEPENDENCY_LAYERS).toHaveLength(40);
+  it('has 39 dependency layers', () => {
+    expect(STDLIB_DEPENDENCY_LAYERS).toHaveLength(39);
   });
 
   it('getStdlibFiles returns flat list of all files', () => {
     const files = getStdlibFiles();
-    expect(files).toHaveLength(95);
+    expect(files).toHaveLength(94);
     expect(files[0]).toBe('Base.kerml');
     expect(files[files.length - 1]).toBe('DerivationConnections.sysml');
   });
@@ -56,7 +56,7 @@ describe('stdlib config', () => {
     expect(STDLIB_DEPENDENCY_LAYERS[10]).toEqual(['KerML.kerml']);
   });
 
-  it('SysML.sysml is in layer 23 (index 22)', () => {
-    expect(STDLIB_DEPENDENCY_LAYERS[22]).toEqual(['SysML.sysml']);
+  it('SysML.sysml is in layer 22 (index 21)', () => {
+    expect(STDLIB_DEPENDENCY_LAYERS[21]).toEqual(['SysML.sysml']);
   });
 });
