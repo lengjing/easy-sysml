@@ -42,6 +42,12 @@ export interface FreeCodeOptions {
    * @default false
    */
   dangerouslySkipPermissions?: boolean
+  /**
+   * Initial conversation history to prepend before the user prompt.
+   * Enables multi-turn / memory-persistent conversations.
+   * Each message should have `role: 'user'|'assistant'` and `content: string`.
+   */
+  initialMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
 }
 
 // ---------------------------------------------------------------------------

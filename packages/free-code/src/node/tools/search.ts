@@ -260,11 +260,12 @@ export async function grepSearch(
 // ---------------------------------------------------------------------------
 
 export const globTool: ToolDefinition = {
-  name: 'glob',
+  name: 'Glob',
   description:
     'Find files matching a glob pattern recursively in the project. ' +
     'Supports * (any chars in segment), ** (any path), ? (single char). ' +
-    'Skips hidden directories and node_modules.',
+    'Skips hidden directories and node_modules. ' +
+    'Adapted from free-code\'s GlobTool (`src/tools/GlobTool/`).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -280,11 +281,12 @@ export const globTool: ToolDefinition = {
 }
 
 export const grepTool: ToolDefinition = {
-  name: 'grep',
+  name: 'Grep',
   description:
     'Search file contents using a regular expression. ' +
     'Skips hidden directories and node_modules. ' +
-    'Use filePattern to limit to specific file types (e.g. "*.ts").',
+    'Use filePattern to limit to specific file types (e.g. "*.ts"). ' +
+    'Adapted from free-code\'s GrepTool (`src/tools/GrepTool/`).',
   inputSchema: {
     type: 'object',
     properties: {

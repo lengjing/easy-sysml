@@ -156,10 +156,11 @@ export async function editFile(
 // ---------------------------------------------------------------------------
 
 export const readFileTool: ToolDefinition = {
-  name: 'read_file',
+  name: 'Read',
   description:
     'Read the contents of a file from disk. Returns lines with 1-based line numbers. ' +
-    'Use startLine/endLine to read a specific section.',
+    'Use startLine/endLine to read a specific section. ' +
+    'Adapted from free-code\'s FileReadTool (`src/tools/FileReadTool/`).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -175,10 +176,11 @@ export const readFileTool: ToolDefinition = {
 }
 
 export const writeFileTool: ToolDefinition = {
-  name: 'write_file',
+  name: 'Write',
   description:
     'Create or overwrite a file with the given content. ' +
-    'Parent directories are created automatically.',
+    'Parent directories are created automatically. ' +
+    'Adapted from free-code\'s FileWriteTool (`src/tools/FileWriteTool/`).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -193,11 +195,12 @@ export const writeFileTool: ToolDefinition = {
 }
 
 export const editFileTool: ToolDefinition = {
-  name: 'edit_file',
+  name: 'Edit',
   description:
     'Replace a range of lines in an existing file. ' +
     'startLine and endLine are 1-based and inclusive. ' +
-    'The specified line range is replaced with newContent.',
+    'The specified line range is replaced with newContent. ' +
+    'Adapted from free-code\'s FileEditTool (`src/tools/FileEditTool/`).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -210,5 +213,67 @@ export const editFileTool: ToolDefinition = {
   },
   execute(input, options) {
     return editFile(input as EditFileInput, options)
+  },
+}
+
+// ---------------------------------------------------------------------------
+// listDir
+// ---------------------------------------------------------------------------
+
+import { readdir } from 'fs/promises'
+import { join as joinPath } from 'path'
+
+export interface ListDirInput {
+  path?: string
+}
+
+/**
+ * List directory contents (similar to `ls` / `readdir`).
+ * Returns filenames with type indicator (file/dir/symlink).
+ */
+export async function listDir(
+  input: ListDirInput,
+  options: FreeCodeOptions = {},
+): Promise<ToolResult> {
+  const cwd = options.cwd ?? process.cwd()
+  const targetPath = resolve(cwd, input.path ?? '.')
+
+  let entries: Awaited<ReturnType<typeof readdir>>
+  try {
+    entries = await readdir(targetPath, { withFileTypes: true })
+  } catch (err: unknown) {
+    return { output: `Error listing directory: ${(err as Error).message}`, isError: true }
+  }
+
+  if (entries.length === 0) {
+    return { output: `(empty directory: ${targetPath})`, isError: false }
+  }
+
+  const lines = entries.map(e => {
+    const indicator = e.isDirectory() ? '/' : e.isSymbolicLink() ? '@' : ''
+    return `${e.name}${indicator}`
+  })
+
+  return { output: lines.join('\n'), isError: false }
+}
+
+export const listDirTool: ToolDefinition = {
+  name: 'ListDir',
+  description:
+    'Lists the contents of a directory. ' +
+    'Entries ending with / are directories, @ indicates symlinks. ' +
+    'Adapted from free-code ls-style tooling.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Directory path to list (relative to cwd or absolute). Defaults to cwd.',
+      },
+    },
+    required: [],
+  },
+  execute(input, options) {
+    return listDir(input as ListDirInput, options)
   },
 }

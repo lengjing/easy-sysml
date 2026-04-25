@@ -1,14 +1,25 @@
 /**
  * FreeCodeAgent — the core Node.js agent class for free-code.
  *
- * Wraps the Anthropic SDK with a tool-calling agentic loop. No React, no Ink,
- * no CLI dependencies.  All tools are pure Node.js.
+ * Wraps the multi-provider Anthropic SDK (Anthropic direct, AWS Bedrock,
+ * Google Vertex AI, Anthropic Foundry, OpenAI-compatible) with a powerful
+ * tool-calling agentic loop.  Provider selection mirrors free-code's own
+ * environment-variable-based approach from `src/utils/model/providers.ts`.
+ *
+ * No React, no Ink, no CLI dependencies — pure Node.js.
  *
  * @example
  * ```ts
- * import { FreeCodeAgent } from '@easy-sysml/free-code/node'
+ * // Direct Anthropic API (default)
+ * const agent = createAgent({ apiKey: process.env.ANTHROPIC_API_KEY })
  *
- * const agent = new FreeCodeAgent({ apiKey: process.env.ANTHROPIC_API_KEY })
+ * // AWS Bedrock
+ * // CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1 node app.js
+ * const agent = createAgent()
+ *
+ * // Google Vertex AI
+ * // CLAUDE_CODE_USE_VERTEX=1 ANTHROPIC_VERTEX_PROJECT_ID=my-project node app.js
+ * const agent = createAgent()
  *
  * // Streaming
  * for await (const msg of agent.query('List all TypeScript files in src/')) {
@@ -22,15 +33,6 @@
  * ```
  */
 
-import Anthropic from '@anthropic-ai/sdk'
-import type {
-  MessageParam,
-  Tool,
-  ContentBlock,
-  ToolUseBlock,
-  ToolResultBlockParam,
-  Usage,
-} from '@anthropic-ai/sdk/resources/messages.mjs'
 import type {
   AgentMessage,
   FreeCodeOptions,
@@ -39,28 +41,40 @@ import type {
   ToolResult,
 } from './types.js'
 import { bashTool } from './tools/bash.js'
-import { readFileTool, writeFileTool, editFileTool } from './tools/file.js'
+import { readFileTool, writeFileTool, editFileTool, listDirTool } from './tools/file.js'
 import { globTool, grepTool } from './tools/search.js'
+import { webFetchTool } from './tools/web.js'
+import { todoReadTool, todoWriteTool } from './tools/todo.js'
+import {
+  createAPIClient,
+  getAPIProvider,
+  getDefaultModel,
+  type AnthropicClientLike,
+} from './providers.js'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TURNS = 10
 const DEFAULT_SYSTEM_PROMPT =
-  'You are a helpful AI coding assistant. ' +
-  'You have access to tools that let you run bash commands, read/write files, and search the codebase. ' +
-  'Use them to help the user accomplish their goals. ' +
-  'Be concise and precise in your responses.'
+  'You are a helpful AI coding assistant with access to a powerful set of tools. ' +
+  'You can run bash commands, read/write/edit files, search the codebase, fetch web pages, ' +
+  'and manage tasks. Use these tools systematically to help the user accomplish their goals. ' +
+  'Plan your approach before taking actions, verify results, and be concise in responses.'
 
+/** All built-in tools adapted from free-code tool registry */
 const BUILTIN_TOOLS: ToolDefinition[] = [
-  bashTool,
-  readFileTool,
-  writeFileTool,
-  editFileTool,
-  globTool,
-  grepTool,
+  bashTool,       // BashTool equivalent
+  readFileTool,   // FileReadTool equivalent
+  writeFileTool,  // FileWriteTool equivalent
+  editFileTool,   // FileEditTool equivalent
+  listDirTool,    // ls / directory listing
+  globTool,       // GlobTool equivalent
+  grepTool,       // GrepTool equivalent
+  webFetchTool,   // WebFetchTool equivalent
+  todoReadTool,   // TodoReadTool equivalent
+  todoWriteTool,  // TodoWriteTool equivalent
 ]
 
 // ---------------------------------------------------------------------------
@@ -76,8 +90,12 @@ const PRICE_PER_MILLION: Record<string, { input: number; output: number }> = {
   'claude-haiku-4-5': { input: 0.8, output: 4 },
 }
 
-function estimateCost(model: string, usage: Usage): number {
-  const priceKey = Object.keys(PRICE_PER_MILLION).find(k => model.startsWith(k)) ?? ''
+function estimateCost(
+  model: string,
+  usage: { input_tokens: number; output_tokens: number },
+): number {
+  const priceKey =
+    Object.keys(PRICE_PER_MILLION).find(k => model.startsWith(k)) ?? ''
   const price = PRICE_PER_MILLION[priceKey] ?? { input: 3, output: 15 }
   const inputCost = ((usage.input_tokens ?? 0) / 1_000_000) * price.input
   const outputCost = ((usage.output_tokens ?? 0) / 1_000_000) * price.output
@@ -89,29 +107,50 @@ function estimateCost(model: string, usage: Usage): number {
 // ---------------------------------------------------------------------------
 
 export class FreeCodeAgent {
-  private readonly client: Anthropic
-  private readonly options: Required<Pick<FreeCodeOptions, 'model' | 'cwd' | 'maxTurns' | 'systemPrompt' | 'dangerouslySkipPermissions'>> & FreeCodeOptions
+  private clientPromise: Promise<AnthropicClientLike> | null = null
+  private readonly options: FreeCodeOptions & {
+    model: string
+    cwd: string
+    maxTurns: number
+    systemPrompt: string
+  }
   private readonly tools: Map<string, ToolDefinition>
 
   constructor(options: FreeCodeOptions = {}) {
-    this.client = new Anthropic({
-      apiKey: options.apiKey ?? process.env['ANTHROPIC_API_KEY'],
-      ...(options.baseURL ? { baseURL: options.baseURL } : {}),
-    })
+    const provider = getAPIProvider()
 
     this.options = {
       ...options,
-      model: options.model ?? DEFAULT_MODEL,
+      model: options.model ?? getDefaultModel(provider),
       cwd: options.cwd ?? process.cwd(),
       maxTurns: options.maxTurns ?? DEFAULT_MAX_TURNS,
       systemPrompt: options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-      dangerouslySkipPermissions: options.dangerouslySkipPermissions ?? false,
     }
 
     this.tools = new Map()
     for (const tool of BUILTIN_TOOLS) {
       this.tools.set(tool.name, tool)
     }
+  }
+
+  /** Returns the active API provider name (mirrors free-code's getAPIProvider) */
+  get provider() {
+    return getAPIProvider()
+  }
+
+  /** Returns the effective model name */
+  get model() {
+    return this.options.model
+  }
+
+  /** Lazily creates (and caches) the provider-specific SDK client */
+  private getClient(): Promise<AnthropicClientLike> {
+    if (!this.clientPromise) {
+      this.clientPromise = createAPIClient({
+        apiKey: this.options.apiKey,
+      })
+    }
+    return this.clientPromise
   }
 
   /** Register a custom tool (overrides any built-in with the same name). */
@@ -124,6 +163,11 @@ export class FreeCodeAgent {
   removeTool(name: string): this {
     this.tools.delete(name)
     return this
+  }
+
+  /** Returns a snapshot of all currently registered tool names */
+  getToolNames(): string[] {
+    return [...this.tools.keys()]
   }
 
   // -------------------------------------------------------------------------
@@ -146,8 +190,15 @@ export class FreeCodeAgent {
     queryOptions: Partial<FreeCodeOptions> = {},
   ): AsyncGenerator<AgentMessage> {
     const opts = { ...this.options, ...queryOptions }
-    const messages: MessageParam[] = [{ role: 'user', content: prompt }]
-    const anthropicTools: Tool[] = [...this.tools.values()].map(t => ({
+    const client = await this.getClient()
+
+    // Support conversation history via initialMessages option
+    const messages: Array<{ role: string; content: unknown }> = [
+      ...(opts.initialMessages ?? []),
+      { role: 'user', content: prompt },
+    ]
+
+    const anthropicTools = [...this.tools.values()].map(t => ({
       name: t.name,
       description: t.description,
       input_schema: t.inputSchema,
@@ -162,9 +213,14 @@ export class FreeCodeAgent {
 
     while (turnCount < opts.maxTurns) {
       turnCount++
-      let response: Awaited<ReturnType<typeof this.client.messages.create>>
+      let response: {
+        content: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>
+        usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
+        stop_reason?: string
+      }
+
       try {
-        response = await this.client.messages.create({
+        response = await (client.messages.create as (params: Record<string, unknown>) => Promise<typeof response>)({
           model: opts.model,
           max_tokens: 8192,
           system: opts.systemPrompt,
@@ -185,7 +241,6 @@ export class FreeCodeAgent {
       const turnCost = estimateCost(opts.model, u)
       totalCostUSD += turnCost
 
-      // Yield usage for this turn
       yield {
         type: 'usage',
         inputTokens: u.input_tokens,
@@ -196,31 +251,30 @@ export class FreeCodeAgent {
       }
 
       // Process content blocks
-      const toolResults: ToolResultBlockParam[] = []
+      const toolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }> = []
       let hasText = false
       let lastText = ''
 
       for (const block of response.content) {
         if (block.type === 'text') {
           hasText = true
-          lastText = block.text
-          yield { type: 'text', text: block.text }
+          lastText = block.text ?? ''
+          yield { type: 'text', text: lastText }
         } else if (block.type === 'tool_use') {
-          const toolUseBlock = block as ToolUseBlock
-          const toolInput = toolUseBlock.input as Record<string, unknown>
+          const toolInput = (block.input as Record<string, unknown>) ?? {}
           yield {
             type: 'tool_call',
-            toolName: toolUseBlock.name,
-            toolUseId: toolUseBlock.id,
+            toolName: block.name ?? '',
+            toolUseId: block.id ?? '',
             input: toolInput,
           }
 
           // Execute tool
-          const toolDef = this.tools.get(toolUseBlock.name)
+          const toolDef = this.tools.get(block.name ?? '')
           let toolResult: ToolResult
           if (!toolDef) {
             toolResult = {
-              output: `Unknown tool: ${toolUseBlock.name}`,
+              output: `Unknown tool: ${block.name}`,
               isError: true,
             }
           } else {
@@ -236,24 +290,24 @@ export class FreeCodeAgent {
 
           yield {
             type: 'tool_result',
-            toolName: toolUseBlock.name,
-            toolUseId: toolUseBlock.id,
+            toolName: block.name ?? '',
+            toolUseId: block.id ?? '',
             output: toolResult.output,
             isError: toolResult.isError,
           }
 
           toolResults.push({
             type: 'tool_result',
-            tool_use_id: toolUseBlock.id,
+            tool_use_id: block.id ?? '',
             content: toolResult.output,
             is_error: toolResult.isError,
           })
         }
       }
 
-      // If there were tool calls, add assistant message + tool results and continue loop
+      // If there were tool calls, continue agentic loop
       if (toolResults.length > 0) {
-        messages.push({ role: 'assistant', content: response.content as ContentBlock[] })
+        messages.push({ role: 'assistant', content: response.content })
         messages.push({ role: 'user', content: toolResults })
         continue
       }
@@ -320,7 +374,13 @@ export class FreeCodeAgent {
 
 /**
  * Create a `FreeCodeAgent` instance with the given options.
- * Convenience wrapper so callers don't need `new`.
+ *
+ * Provider is chosen by environment variables (same as free-code CLI):
+ * - Default: Anthropic direct API (`ANTHROPIC_API_KEY`)
+ * - `CLAUDE_CODE_USE_BEDROCK=1`: AWS Bedrock
+ * - `CLAUDE_CODE_USE_VERTEX=1`: Google Vertex AI
+ * - `CLAUDE_CODE_USE_FOUNDRY=1`: Anthropic Foundry
+ * - `CLAUDE_CODE_USE_OPENAI=1`: OpenAI-compatible endpoint
  */
 export function createAgent(options: FreeCodeOptions = {}): FreeCodeAgent {
   return new FreeCodeAgent(options)

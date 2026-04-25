@@ -177,3 +177,68 @@ describe('editFile', () => {
     expect(result.isError).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// listDir
+// ---------------------------------------------------------------------------
+
+import { listDir } from '../tools/file.js'
+import { mkdir } from 'fs/promises'
+
+describe('listDir', () => {
+  it('lists files and directories in a directory', async () => {
+    await writeFile({ path: 'a.txt', content: 'hello' }, { cwd: tmpDir })
+    await writeFile({ path: 'b.ts', content: 'world' }, { cwd: tmpDir })
+    await mkdir(join(tmpDir, 'subdir'))
+
+    const result = await listDir({}, { cwd: tmpDir })
+
+    expect(result.isError).toBe(false)
+    expect(result.output).toContain('a.txt')
+    expect(result.output).toContain('b.ts')
+    expect(result.output).toContain('subdir/')
+  })
+
+  it('marks directories with trailing slash', async () => {
+    await mkdir(join(tmpDir, 'mydir'))
+
+    const result = await listDir({}, { cwd: tmpDir })
+
+    expect(result.output).toContain('mydir/')
+  })
+
+  it('lists a specific subdirectory by path', async () => {
+    await mkdir(join(tmpDir, 'inner'))
+    await writeFile({ path: 'inner/file.ts', content: '' }, { cwd: tmpDir })
+
+    const result = await listDir({ path: 'inner' }, { cwd: tmpDir })
+
+    expect(result.isError).toBe(false)
+    expect(result.output).toContain('file.ts')
+  })
+
+  it('returns message for empty directory', async () => {
+    await mkdir(join(tmpDir, 'empty'))
+
+    const result = await listDir({ path: 'empty' }, { cwd: tmpDir })
+
+    expect(result.isError).toBe(false)
+    expect(result.output).toContain('empty')
+  })
+
+  it('returns isError=true for non-existent path', async () => {
+    const result = await listDir({ path: 'does/not/exist' }, { cwd: tmpDir })
+
+    expect(result.isError).toBe(true)
+    expect(result.output).toContain('Error')
+  })
+
+  it('lists the cwd when no path specified', async () => {
+    await writeFile({ path: 'root.txt', content: '' }, { cwd: tmpDir })
+
+    const result = await listDir({}, { cwd: tmpDir })
+
+    expect(result.isError).toBe(false)
+    expect(result.output).toContain('root.txt')
+  })
+})

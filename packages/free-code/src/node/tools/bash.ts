@@ -77,10 +77,11 @@ export async function runBash(
 // ---------------------------------------------------------------------------
 
 export const bashTool: ToolDefinition = {
-  name: 'bash',
+  name: 'Bash',
   description:
     'Execute a shell command in a bash process. Returns stdout and stderr combined. ' +
-    'Use for running scripts, building projects, running tests, etc.',
+    'Use for running scripts, building projects, running tests, etc. ' +
+    'Adapted from free-code\'s BashTool (`src/tools/BashTool/`).',
   inputSchema: {
     type: 'object',
     properties: {
