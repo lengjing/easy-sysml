@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import { resolve } from 'path'
 
 export default defineConfig({
   test: {
@@ -7,7 +8,10 @@ export default defineConfig({
     environment: 'node',
   },
   resolve: {
-    // Allow importing .ts files with .js extensions (needed for vitest)
-    extensions: ['.ts', '.js'],
+    alias: {
+      'bun:bundle': resolve(__dirname, 'src/vendor/bun-bundle.ts'),
+      'src/': resolve(__dirname, 'src/') + '/',
+    },
+    extensions: ['.ts', '.tsx', '.js'],
   },
 })
