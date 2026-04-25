@@ -1,6 +1,7 @@
 import { QueryEngine } from '../QueryEngine.js'
 import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js'
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
+import type { Message } from '../types/message.js'
 import { getCwd } from '../utils/cwd.js'
 import {
   createFileStateCacheWithSizeLimit,
@@ -14,11 +15,17 @@ export interface HeadlessQueryOptions {
   appendSystemPrompt?: string
   maxTurns?: number
   verbose?: boolean
+  /**
+   * When false, tool use requires explicit permission rules.
+   * Defaults to true (bypass all permissions) — appropriate for
+   * automated/programmatic headless usage in trusted environments.
+   */
   bypassPermissions?: boolean
   cwd?: string
   model?: string
   tools?: typeof HEADLESS_TOOLS
-  initialMessages?: unknown[]
+  /** Seed conversation history (typed as Message from free-code internals). */
+  initialMessages?: Message[]
 }
 
 export async function* headlessQuery(
@@ -45,7 +52,7 @@ export async function* headlessQuery(
     verbose: options.verbose,
     userSpecifiedModel: options.model,
     readFileCache: createFileStateCacheWithSizeLimit(READ_FILE_STATE_CACHE_SIZE),
-    initialMessages: (options.initialMessages ?? []) as any,
+    initialMessages: options.initialMessages ?? [],
   })
 
   yield* engine.submitMessage(prompt)
