@@ -1,145 +1,111 @@
 /**
- * Shared TypeScript types for the free-code Node.js library.
+ * Re-exports the SDK message types from free-code's agentSdkTypes entrypoint.
  *
- * These types mirror the SDK message shapes from agentSdkTypes.ts but are
- * kept self-contained so the node library has no dependency on the CLI code.
+ * These are the same types used by the official Claude Code SDK and emitted by
+ * the free-code CLI when run with `--output-format stream-json`.
+ *
+ * @see src/entrypoints/agentSdkTypes.ts  — canonical source
+ * @see src/entrypoints/sdk/coreTypes.generated.ts — generated type definitions
  */
 
+// Re-export all public SDK types from free-code's own agentSdkTypes module.
+// These cover the full NDJSON message stream: assistant, user, result, system,
+// tool_progress, status, compact_boundary, permission_denial, rate_limit, etc.
+export type {
+  SDKMessage,
+  SDKAssistantMessage,
+  SDKPartialAssistantMessage,
+  SDKResultMessage,
+  SDKSystemMessage,
+  SDKStatusMessage,
+  SDKToolProgressMessage,
+  SDKPermissionDenial,
+  SDKUserMessage,
+  SDKUserMessageReplay,
+  SDKCompactBoundaryMessage,
+  SDKBaseMessage,
+  SDKStatus,
+  ModelUsage,
+  PermissionMode,
+  PermissionResult,
+} from '../entrypoints/agentSdkTypes.js'
+
 // ---------------------------------------------------------------------------
-// Configuration
+// Client-specific types (not part of the SDK message protocol)
 // ---------------------------------------------------------------------------
 
-export interface FreeCodeOptions {
-  /** Anthropic API key. Defaults to ANTHROPIC_API_KEY env var. */
-  apiKey?: string
+/** Options for spawning a free-code query */
+export type QueryOptions = {
   /**
-   * Model ID to use.
-   * @default 'claude-sonnet-4-6'
-   */
-  model?: string
-  /**
-   * Working directory for file/bash tool calls.
-   * @default process.cwd()
+   * Working directory for the agent. Defaults to `process.cwd()`.
    */
   cwd?: string
+
   /**
-   * Maximum number of agentic turns before stopping.
-   * @default 10
+   * Model name or alias to use. Respects the same overrides as the CLI:
+   * `ANTHROPIC_MODEL` env var, `--model` flag, etc.
+   */
+  model?: string
+
+  /**
+   * Maximum number of agentic turns. Maps to `--max-turns`.
+   * Defaults to unlimited (CLI default).
    */
   maxTurns?: number
+
   /**
-   * Base URL for the Anthropic API (useful for OpenAI-compatible proxies).
-   * Defaults to the Anthropic SDK default.
+   * Maximum API spend in USD. Maps to `--max-budget-usd`.
    */
-  baseURL?: string
+  maxBudgetUSD?: number
+
   /**
-   * System prompt override.  When omitted a minimal default is used.
-   */
-  systemPrompt?: string
-  /**
-   * If true, run tools with `dangerouslySkipPermissions` — no confirmation
-   * prompts (suitable for server-side automated use).
-   * @default false
+   * When true, all tool permissions are automatically granted.
+   * Maps to `--dangerously-skip-permissions`.
+   * Use only in trusted sandboxes.
    */
   dangerouslySkipPermissions?: boolean
+
   /**
-   * Initial conversation history to prepend before the user prompt.
-   * Enables multi-turn / memory-persistent conversations.
-   * Each message should have `role: 'user'|'assistant'` and `content: string`.
+   * System prompt to prepend. Maps to `--system-prompt`.
    */
-  initialMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
+  systemPrompt?: string
+
+  /**
+   * Additional environment variables to pass to the CLI subprocess.
+   */
+  env?: Record<string, string>
+
+  /**
+   * Abort signal to cancel the query mid-stream.
+   */
+  signal?: AbortSignal
+
+  /**
+   * Session ID to resume. Maps to `--resume`.
+   */
+  sessionId?: string
+
+  /**
+   * Custom path to the free-code binary.
+   * If not set, falls back to `FREE_CODE_BIN` env var, then auto-discovery.
+   */
+  binPath?: string
 }
 
-// ---------------------------------------------------------------------------
-// Streaming message types (mirrors SDK shape)
-// ---------------------------------------------------------------------------
-
-export type AgentMessageType =
-  | 'text'
-  | 'tool_call'
-  | 'tool_result'
-  | 'usage'
-  | 'error'
-  | 'done'
-
-export interface TextMessage {
-  type: 'text'
-  text: string
-}
-
-export interface ToolCallMessage {
-  type: 'tool_call'
-  toolName: string
-  toolUseId: string
-  input: Record<string, unknown>
-}
-
-export interface ToolResultMessage {
-  type: 'tool_result'
-  toolName: string
-  toolUseId: string
-  output: string
-  isError: boolean
-}
-
-export interface UsageMessage {
-  type: 'usage'
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheCreationTokens: number
-  costUSD: number
-}
-
-export interface ErrorMessage {
-  type: 'error'
-  message: string
-}
-
-export interface DoneMessage {
-  type: 'done'
+/** Result of a completed (one-shot) query */
+export type RunQueryResult = {
+  /** Final text response from the model */
   result: string
-  usage: Omit<UsageMessage, 'type'>
-  turnCount: number
-}
-
-export type AgentMessage =
-  | TextMessage
-  | ToolCallMessage
-  | ToolResultMessage
-  | UsageMessage
-  | ErrorMessage
-  | DoneMessage
-
-// ---------------------------------------------------------------------------
-// Tool types
-// ---------------------------------------------------------------------------
-
-export interface ToolDefinition {
-  name: string
-  description: string
-  inputSchema: {
-    type: 'object'
-    properties: Record<string, unknown>
-    required?: string[]
-  }
-  execute(input: Record<string, unknown>, options: FreeCodeOptions): Promise<ToolResult>
-}
-
-export interface ToolResult {
-  output: string
+  /** True if the query ended in an error */
   isError: boolean
-}
-
-// ---------------------------------------------------------------------------
-// Query result (non-streaming)
-// ---------------------------------------------------------------------------
-
-export interface QueryResult {
-  /** Final text output from the agent */
-  result: string
-  /** Number of agentic turns taken */
-  turnCount: number
-  /** Token/cost usage */
-  usage: Omit<UsageMessage, 'type'>
+  /** All messages emitted during the query */
+  messages: import('../entrypoints/agentSdkTypes.js').SDKMessage[]
+  /** Total API cost in USD */
+  totalCostUSD?: number
+  /** Duration of the query in milliseconds */
+  durationMs?: number
+  /** Number of agentic turns used */
+  numTurns?: number
+  /** Session ID (for resuming later) */
+  sessionId?: string
 }
