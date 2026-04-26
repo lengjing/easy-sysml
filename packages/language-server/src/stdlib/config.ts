@@ -7,7 +7,7 @@
  * Files are organized in dependency layers:
  * - KerML foundation (layers 1-11): 36 files
  * - SysML core (layers 12-22): 21 files
- * - Domain libraries (layers 23-36): 37 files
+ * - Domain libraries (layers 23-39): 37 files
  *
  * Within a layer, files can be loaded in parallel.
  * Layers must be loaded sequentially.

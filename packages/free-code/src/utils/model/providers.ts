@@ -1,6 +1,16 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
 import { isEnvTruthy } from '../envUtils.js'
 
+/**
+ * Supported API providers.
+ *
+ * - firstParty  — Anthropic direct API (ANTHROPIC_API_KEY)
+ * - bedrock     — AWS Bedrock (CLAUDE_CODE_USE_BEDROCK=1)
+ * - vertex      — Google Vertex AI (CLAUDE_CODE_USE_VERTEX=1)
+ * - foundry     — Anthropic Foundry / Azure AI (CLAUDE_CODE_USE_FOUNDRY=1)
+ * - openai      — Any OpenAI-compatible endpoint, e.g. Qwen, DeepSeek, Ollama
+ *                 (CLAUDE_CODE_USE_OPENAI=1 + OPENAI_BASE_URL + OPENAI_API_KEY)
+ */
 export type APIProvider = 'firstParty' | 'bedrock' | 'vertex' | 'foundry' | 'openai'
 
 export function getAPIProvider(): APIProvider {

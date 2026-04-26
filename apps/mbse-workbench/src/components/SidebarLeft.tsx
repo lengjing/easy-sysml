@@ -304,10 +304,30 @@ export const SidebarLeft = ({
 
           <div className="h-px bg-[var(--border-color)] my-2 mx-2" />
 
-          <TreeItem label="图表列表 (Diagrams)" icon={TableIcon} isOpen={true} onContextMenu={handleContextMenu}>
-            <TreeItem label="系统层级结构图 (BDD)" icon={Layers} isLeaf active onContextMenu={handleContextMenu} />
-            <TreeItem label="内部块图 (IBD)" icon={Layers} isLeaf onContextMenu={handleContextMenu} />
-            <TreeItem label="起飞流程 (ActD)" icon={Activity} isLeaf onContextMenu={handleContextMenu} />
+          <TreeItem label="视图列表 (Views)" icon={TableIcon} isOpen={true} onContextMenu={handleContextMenu}>
+            {/* 基础视图 Basic Views */}
+            <TreeItem label="基础视图 (Basic Views)" icon={Layers} isOpen={true} onContextMenu={handleContextMenu}>
+              <TreeItem label="通用视图 (GeneralView)" icon={Eye} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="包视图 (PackageView)" icon={Package} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="需求视图 (RequirementView)" icon={FileText} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="定义和使用视图 (DefinitionUsageView)" icon={Layers} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="互联视图 (InterconnectionView)" icon={Network} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="动作流视图 (ActionFlowView)" icon={Activity} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="状态转换视图 (StateTransitionView)" icon={Activity} isLeaf onContextMenu={handleContextMenu} />
+              <TreeItem label="语言扩展视图 (LanguageExtensionView)" icon={Database} isLeaf onContextMenu={handleContextMenu} />
+            </TreeItem>
+            {/* 表格视图 Table Views */}
+            <TreeItem label="表格视图 (Table Views)" icon={TableIcon} isOpen={true} onContextMenu={handleContextMenu}>
+              <TreeItem label="通用表 (GeneralTable)" icon={TableIcon} isLeaf onContextMenu={handleContextMenu} />
+            </TreeItem>
+            {/* 矩阵视图 Matrix Views */}
+            <TreeItem label="矩阵视图 (Matrix Views)" icon={CheckSquare} isOpen={true} onContextMenu={handleContextMenu}>
+              <TreeItem label="关系矩阵 (RelationshipMatrix)" icon={CheckSquare} isLeaf onContextMenu={handleContextMenu} />
+            </TreeItem>
+            {/* 追溯视图 Traceability Views */}
+            <TreeItem label="追溯视图 (Traceability Views)" icon={Network} isOpen={true} onContextMenu={handleContextMenu}>
+              <TreeItem label="追溯图 (TraceabilityView)" icon={Network} isLeaf onContextMenu={handleContextMenu} />
+            </TreeItem>
           </TreeItem>
 
           <div className="h-px bg-[var(--border-color)] my-2 mx-2" />
