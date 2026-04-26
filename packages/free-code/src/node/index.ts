@@ -1,5 +1,5 @@
 export { headlessQuery, headlessRunQuery } from './headlessAgent.js'
 export { createHeadlessStore } from './headlessState.js'
 export { HEADLESS_TOOLS } from './headlessTools.js'
-export type { HeadlessQueryOptions } from './headlessAgent.js'
+export type { HeadlessQueryOptions, OpenAICompatConfig } from './headlessAgent.js'
 export type { SDKMessage, SDKResultMessage } from '../entrypoints/agentSdkTypes.js'

@@ -36,6 +36,7 @@ import {
   isEnvTruthy,
 } from '../../utils/envUtils.js'
 import { createCodexFetch } from './codex-fetch-adapter.js'
+import { createOpenAICompatFetch } from './openai-compat-fetch-adapter.js'
 
 /**
  * Environment variables for different client types:
@@ -303,6 +304,24 @@ export async function getAnthropicClient({
     }
     // we have always been lying about the return type - this doesn't support batching or models
     return new AnthropicVertex(vertexArgs) as unknown as Anthropic
+  }
+
+  // ── Generic OpenAI-compatible provider (Qwen, DeepSeek, Ollama, …) ──────────
+  // Enabled by CLAUDE_CODE_USE_OPENAI=1 with OPENAI_BASE_URL set.
+  // Falls through to Codex / first-party otherwise.
+  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) && process.env.OPENAI_BASE_URL) {
+    const openAIApiKey =
+      process.env.OPENAI_API_KEY || apiKey || getAnthropicApiKey() || 'sk-placeholder'
+    const openAIBaseUrl = process.env.OPENAI_BASE_URL
+    const openAICompatFetch = createOpenAICompatFetch(openAIApiKey, openAIBaseUrl)
+    const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
+      apiKey: openAIApiKey,
+      baseURL: openAIBaseUrl,
+      ...ARGS,
+      fetch: openAICompatFetch as unknown as typeof globalThis.fetch,
+      ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+    }
+    return new Anthropic(clientConfig)
   }
 
   // ── Codex (OpenAI) provider via fetch adapter ─────────────────────
