@@ -1,24 +1,13 @@
 /**
  * AI Agent Server — Main Entry Point
  *
- * Express + WebSocket server providing a Copilot-style AI agent for SysML v2 modeling.
+ * Express server providing a Copilot-style AI agent for SysML v2 modeling.
  * Uses Vercel AI SDK (`ai` package) for:
  *   - Native tool calling via the model's tools API (MCP-style)
  *   - Multi-step agent loops with `maxSteps`
- *   - Streaming text + tool results via SSE (HTTP) and WebSocket
+ *   - Streaming text + tool results via SSE
  *
- * HTTP Endpoints:
- *   POST /api/chat    — streaming SSE agent (text/event-stream)
- *   GET  /api/status  — provider & configuration status
- *   POST /api/validate — direct SysML v2 validation
- *   GET  /api/stdlib   — standard library query
- *
- * WebSocket Endpoint (ws://localhost:<PORT>/api/ws):
- *   Send: { type: "chat", messages, currentCode?, autoApply? }
- *   Recv: { type: "thinking"|"delta"|"code"|"tool_call"|"error"|"done", ... }
- *
- * SSE Event Types (same as WebSocket message types):
- *   thinking   — model status message
+ * SSE Event Types sent to the frontend:
  *   delta      — streaming text chunk (markdown content)
  *   code       — complete SysML code block extracted from response
  *   tool_call  — tool invocation details (name, status, result)
@@ -26,23 +15,63 @@
  *   done       — stream complete
  */
 
-import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { streamText, stepCountIs } from 'ai';
 import {
   getProvider, getApiKey, getModelId, PROVIDER_PRESETS,
+  createModel,
 } from './provider.js';
-import { validateSysML, mcpTools } from './tools.js';
-import { runAgent } from './agent.js';
-import type { ChatMessage } from './agent.js';
+import { mcpTools, validateSysML } from './tools.js';
 
 dotenv.config();
 
-export const app = express();
+const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+
+/* ------------------------------------------------------------------ */
+/*  System prompt                                                     */
+/* ------------------------------------------------------------------ */
+
+const SYSTEM_PROMPT = `You are a professional SysML v2 modeling agent integrated into an MBSE workbench IDE, similar to GitHub Copilot.
+
+You have access to MCP tools that you MUST use:
+1. **validate_sysml** — ALWAYS call this after generating any SysML v2 code. If validation fails, fix the errors and re-validate.
+2. **get_stdlib_types** — Use this to look up available standard library types when needed.
+
+Your workflow:
+1. Analyze the user's request
+2. Generate SysML v2 code in a \`\`\`sysml code block
+3. Call validate_sysml to verify the code
+4. If validation fails, fix the errors and re-validate
+5. Provide explanation alongside the code
+
+Key SysML v2 syntax rules:
+- Use \`package\` for top-level namespaces
+- Use \`part def\` for part definitions (block definitions)
+- Use \`part\` for part usages (instances)
+- Use \`attribute\` for attributes with types (e.g., \`attribute mass : Real;\`)
+- Use \`port def\` / \`port\` for port definitions/usages
+- Use \`interface def\` / \`interface\` for interface definitions/usages
+- Use \`connection def\` / \`connection\` for connections
+- Use \`action def\` / \`action\` for behavior
+- Use \`state def\` / \`state\` for state machines
+- Use \`requirement def\` / \`requirement\` for requirements
+- Use \`constraint def\` / \`constraint\` for constraints
+- Use \`allocation def\` / \`allocation\` for allocations
+- Use \`flow connection def\` for flow connections
+- Use \`item def\` / \`item\` for items
+- Use \`enum def\` for enumerations
+- Use \`doc /* ... */\` for documentation comments
+- Use \`:>\` for specialization (subtyping)
+- Use \`:\` for typing
+- Use \`import\` for importing elements
+
+IMPORTANT: Always wrap SysML v2 code in \`\`\`sysml code blocks.
+Respond in the same language as the user's input (Chinese or English).
+When you need to think through a problem, share your reasoning.`;
 
 /* ------------------------------------------------------------------ */
 /*  SSE helpers                                                       */
@@ -53,11 +82,25 @@ function sseWrite(res: express.Response, event: string, data: unknown) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Code extraction                                                   */
+/* ------------------------------------------------------------------ */
+
+function extractCodeBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const regex = /```(?:sysml|kerml)?\s*\n([\s\S]*?)```/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    blocks.push(match[1].trim());
+  }
+  return blocks;
+}
+
+/* ------------------------------------------------------------------ */
 /*  POST /api/chat  — streaming SSE agent                             */
 /* ------------------------------------------------------------------ */
 
 interface ChatRequest {
-  messages: ChatMessage[];
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   currentCode?: string;
   autoApply?: boolean;
 }
@@ -88,9 +131,123 @@ app.post('/api/chat', async (req: express.Request, res: express.Response) => {
   });
 
   try {
-    for await (const event of runAgent({ messages, currentCode, autoApply, provider })) {
-      sseWrite(res, event.type, event);
+    const model = createModel(provider);
+
+    // Build messages array
+    const systemMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: SYSTEM_PROMPT },
+    ];
+
+    if (currentCode?.trim()) {
+      systemMessages.push({
+        role: 'system',
+        content: `The user's current SysML v2 code in the editor:\n\`\`\`sysml\n${currentCode}\n\`\`\``,
+      });
     }
+
+    const fullMessages = [...systemMessages, ...messages];
+
+    const maxSteps = parseInt(process.env.MAX_AGENT_STEPS || '5', 10);
+
+    // Use Vercel AI SDK streamText with MCP tools and multi-step agent loop
+    const result = streamText({
+      model,
+      messages: fullMessages,
+      tools: mcpTools,
+      stopWhen: stepCountIs(maxSteps),
+      temperature: 0.3,
+      experimental_onToolCallStart: ({ toolCall }) => {
+        sseWrite(res, 'tool_call', {
+          name: toolCall.toolName,
+          args: 'input' in toolCall ? toolCall.input : {},
+          status: 'running',
+        });
+      },
+      experimental_onToolCallFinish: (event) => {
+        if (event.success) {
+          sseWrite(res, 'tool_call', {
+            name: event.toolCall.toolName,
+            args: 'input' in event.toolCall ? event.toolCall.input : {},
+            status: 'completed',
+            result: typeof event.output === 'string'
+              ? event.output
+              : JSON.stringify(event.output).slice(0, 200),
+          });
+        } else {
+          sseWrite(res, 'tool_call', {
+            name: event.toolCall.toolName,
+            args: {},
+            status: 'error',
+            result: event.error instanceof Error ? event.error.message : 'Tool call failed',
+          });
+        }
+      },
+    });
+
+    // Stream text deltas and detect code blocks
+    let fullText = '';
+    let inCodeBlock = false;
+    let codeBuffer = '';
+    let proseBuffer = '';
+
+    for await (const chunk of result.textStream) {
+      fullText += chunk;
+
+      // Detect code block boundaries
+      const combined = (inCodeBlock ? codeBuffer : proseBuffer) + chunk;
+
+      if (!inCodeBlock) {
+        proseBuffer += chunk;
+        // Check for code block start
+        const startMatch = proseBuffer.match(/```(?:sysml|kerml)?\s*\n/);
+        if (startMatch && startMatch.index !== undefined) {
+          // Send prose before the code block
+          const before = proseBuffer.slice(0, startMatch.index);
+          if (before.trim()) {
+            sseWrite(res, 'delta', { content: before });
+          }
+          inCodeBlock = true;
+          codeBuffer = proseBuffer.slice(startMatch.index + startMatch[0].length);
+          proseBuffer = '';
+        } else {
+          // Send complete lines as deltas
+          const lastNewline = proseBuffer.lastIndexOf('\n');
+          if (lastNewline >= 0) {
+            const complete = proseBuffer.slice(0, lastNewline + 1);
+            proseBuffer = proseBuffer.slice(lastNewline + 1);
+            if (complete) {
+              sseWrite(res, 'delta', { content: complete });
+            }
+          }
+        }
+      } else {
+        codeBuffer += chunk;
+        // Check for code block end
+        const endIdx = codeBuffer.indexOf('```');
+        if (endIdx >= 0) {
+          const codeContent = codeBuffer.slice(0, endIdx).trim();
+          proseBuffer = codeBuffer.slice(endIdx + 3);
+          codeBuffer = '';
+          inCodeBlock = false;
+
+          // Emit code event
+          if (codeContent) {
+            sseWrite(res, 'code', {
+              content: codeContent,
+              language: 'sysml',
+              autoApply,
+            });
+          }
+        }
+      }
+    }
+
+    // Flush remaining prose
+    if (proseBuffer.trim()) {
+      sseWrite(res, 'delta', { content: proseBuffer });
+    }
+
+    sseWrite(res, 'done', {});
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : '服务器错误';
     sseWrite(res, 'error', { content: message });
@@ -115,7 +272,6 @@ app.get('/api/status', (_req: express.Request, res: express.Response) => {
     model: getModelId(provider),
     configured: !!apiKey,
     tools: Object.keys(mcpTools),
-    wsEndpoint: '/api/ws',
   });
 });
 
@@ -159,105 +315,17 @@ app.get('/api/stdlib', async (req: express.Request, res: express.Response) => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  WebSocket server — /api/ws                                        */
-/* ------------------------------------------------------------------ */
-
-/**
- * Create an HTTP server and attach a WebSocket server to it.
- * The WebSocket server handles connections on the `/api/ws` path.
- *
- * Message protocol (client → server):
- *   { type: "chat", messages: ChatMessage[], currentCode?: string, autoApply?: boolean }
- *
- * Message protocol (server → client):
- *   { type: "thinking"|"delta"|"code"|"tool_call"|"error"|"done", ... }
- */
-export function createServer() {
-  const httpServer = http.createServer(app);
-
-  const wss = new WebSocketServer({ server: httpServer, path: '/api/ws' });
-
-  wss.on('connection', (ws: WebSocket) => {
-    ws.on('message', async (raw: Buffer | string) => {
-      let payload: unknown;
-      try {
-        payload = JSON.parse(raw.toString());
-      } catch {
-        ws.send(JSON.stringify({ type: 'error', content: 'Invalid JSON' }));
-        return;
-      }
-
-      if (
-        typeof payload !== 'object' ||
-        payload === null ||
-        (payload as Record<string, unknown>).type !== 'chat'
-      ) {
-        ws.send(JSON.stringify({ type: 'error', content: 'Expected { type: "chat", messages: [...] }' }));
-        return;
-      }
-
-      const req = payload as {
-        type: 'chat';
-        messages?: ChatMessage[];
-        currentCode?: string;
-        autoApply?: boolean;
-      };
-
-      if (!Array.isArray(req.messages) || req.messages.length === 0) {
-        ws.send(JSON.stringify({ type: 'error', content: 'messages array is required' }));
-        return;
-      }
-
-      const provider = getProvider();
-      const apiKey = getApiKey(provider);
-      const preset = PROVIDER_PRESETS[provider];
-
-      if (!apiKey) {
-        ws.send(JSON.stringify({ type: 'error', content: `未配置 ${preset.label} API Key` }));
-        return;
-      }
-
-      try {
-        for await (const event of runAgent({
-          messages: req.messages,
-          currentCode: req.currentCode,
-          autoApply: req.autoApply ?? true,
-          provider,
-        })) {
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify(event));
-          }
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : '服务器错误';
-        if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({ type: 'error', content: message }));
-        }
-      }
-    });
-
-    ws.on('error', (err) => {
-      console.error('[AI WebSocket] error:', err.message);
-    });
-  });
-
-  return { httpServer, wss };
-}
-
-/* ------------------------------------------------------------------ */
 /*  Start                                                             */
 /* ------------------------------------------------------------------ */
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
-const { httpServer } = createServer();
-
-httpServer.listen(PORT, () => {
+app.listen(PORT, () => {
   const provider = getProvider();
   const preset = PROVIDER_PRESETS[provider];
   console.log(`[AI Agent Server] Running on http://localhost:${PORT}`);
   console.log(`[AI Agent Server] Provider: ${preset.label} (${getModelId(provider)})`);
   console.log(`[AI Agent Server] API Key: ${getApiKey(provider) ? '✓ configured' : '✗ missing'}`);
-  console.log(`[AI Agent Server] WebSocket: ws://localhost:${PORT}/api/ws`);
+  console.log(`[AI Agent Server] Tools: ${Object.keys(mcpTools).join(', ')}`);
   const maxStepsConfig = parseInt(process.env.MAX_AGENT_STEPS || '5', 10);
   console.log(`[AI Agent Server] Agent mode: maxSteps=${maxStepsConfig} (multi-step tool calling)`);
 });
