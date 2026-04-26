@@ -310,8 +310,12 @@ export async function getAnthropicClient({
   // Enabled by CLAUDE_CODE_USE_OPENAI=1 with OPENAI_BASE_URL set.
   // Falls through to Codex / first-party otherwise.
   if (isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) && process.env.OPENAI_BASE_URL) {
-    const openAIApiKey =
-      process.env.OPENAI_API_KEY || apiKey || getAnthropicApiKey() || 'sk-placeholder'
+    const openAIApiKey = process.env.OPENAI_API_KEY || apiKey || getAnthropicApiKey()
+    if (!openAIApiKey) {
+      throw new Error(
+        'OpenAI-compatible provider requires an API key. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.',
+      )
+    }
     const openAIBaseUrl = process.env.OPENAI_BASE_URL
     const openAICompatFetch = createOpenAICompatFetch(openAIApiKey, openAIBaseUrl)
     const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {

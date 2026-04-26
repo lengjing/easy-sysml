@@ -81,6 +81,7 @@ function translateMessages(
   systemPrompt?: string,
 ): OpenAIMessage[] {
   const result: OpenAIMessage[] = []
+  let unknownCallCounter = 0
 
   if (systemPrompt) {
     result.push({ role: 'system', content: systemPrompt })
@@ -115,7 +116,7 @@ function translateMessages(
             contentParts.length = 0
           }
 
-          const toolCallId = (block.tool_use_id as string) || `call_unknown`
+          const toolCallId = (block.tool_use_id as string) || `call_unknown_${unknownCallCounter++}`
           let outputText = ''
           if (typeof block.content === 'string') {
             outputText = block.content
@@ -233,11 +234,12 @@ async function translateOpenAIStreamToAnthropic(
 
       let contentBlockIndex = 0
       let inTextBlock = false
+      let textBlockIndex = -1
       let inToolCall = false
-      let currentToolCallIndex = -1
       let inputTokens = 0
       let outputTokens = 0
       let hadToolCalls = false
+      let unknownCallCounter = 0
 
       // Map from tool_call index → content block index (for multi-tool calls)
       const toolCallBlockMap = new Map<number, number>()
@@ -285,13 +287,15 @@ async function translateOpenAIStreamToAnthropic(
               // Text delta
               if (typeof delta.content === 'string' && delta.content) {
                 if (!inTextBlock) {
+                  textBlockIndex = contentBlockIndex
+                  contentBlockIndex++
                   controller.enqueue(
                     encoder.encode(
                       formatSSE(
                         'content_block_start',
                         JSON.stringify({
                           type: 'content_block_start',
-                          index: contentBlockIndex,
+                          index: textBlockIndex,
                           content_block: { type: 'text', text: '' },
                         }),
                       ),
@@ -305,7 +309,7 @@ async function translateOpenAIStreamToAnthropic(
                       'content_block_delta',
                       JSON.stringify({
                         type: 'content_block_delta',
-                        index: contentBlockIndex,
+                        index: textBlockIndex,
                         delta: { type: 'text_delta', text: delta.content },
                       }),
                     ),
@@ -323,18 +327,18 @@ async function translateOpenAIStreamToAnthropic(
                   const tcIndex = tc.index as number
                   const tcFunc = tc.function as Record<string, string> | undefined
 
-                  // Close open text block if we're starting tool calls
+                  // Close open text block before starting tool calls
                   if (inTextBlock) {
                     controller.enqueue(
                       encoder.encode(
                         formatSSE(
                           'content_block_stop',
-                          JSON.stringify({ type: 'content_block_stop', index: contentBlockIndex }),
+                          JSON.stringify({ type: 'content_block_stop', index: textBlockIndex }),
                         ),
                       ),
                     )
-                    contentBlockIndex++
                     inTextBlock = false
+                    textBlockIndex = -1
                   }
 
                   if (!toolCallBlockMap.has(tcIndex)) {
@@ -343,7 +347,6 @@ async function translateOpenAIStreamToAnthropic(
                     toolCallBlockMap.set(tcIndex, blockIdx)
                     contentBlockIndex++
                     inToolCall = true
-                    currentToolCallIndex = tcIndex
 
                     const toolId = (tc.id as string) || `call_${tcIndex}`
                     const toolName = tcFunc?.name || ''
@@ -389,18 +392,20 @@ async function translateOpenAIStreamToAnthropic(
               // Finish reason
               const finishReason = choice.finish_reason as string | null
               if (finishReason) {
-                // Close all open blocks
+                // Close open text block
                 if (inTextBlock) {
                   controller.enqueue(
                     encoder.encode(
                       formatSSE(
                         'content_block_stop',
-                        JSON.stringify({ type: 'content_block_stop', index: contentBlockIndex - 1 }),
+                        JSON.stringify({ type: 'content_block_stop', index: textBlockIndex }),
                       ),
                     ),
                   )
                   inTextBlock = false
+                  textBlockIndex = -1
                 }
+                // Close all open tool_use blocks
                 for (const [, blockIdx] of toolCallBlockMap) {
                   controller.enqueue(
                     encoder.encode(
@@ -433,7 +438,7 @@ async function translateOpenAIStreamToAnthropic(
                 'content_block_delta',
                 JSON.stringify({
                   type: 'content_block_delta',
-                  index: contentBlockIndex,
+                  index: textBlockIndex,
                   delta: { type: 'text_delta', text: `\n[Error: ${String(err)}]` },
                 }),
               ),
@@ -443,7 +448,7 @@ async function translateOpenAIStreamToAnthropic(
             encoder.encode(
               formatSSE(
                 'content_block_stop',
-                JSON.stringify({ type: 'content_block_stop', index: contentBlockIndex }),
+                JSON.stringify({ type: 'content_block_stop', index: textBlockIndex }),
               ),
             ),
           )
