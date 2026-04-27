@@ -8,9 +8,9 @@
  * to avoid spawning a real Claude process.
  */
 
-import { describe, it, expect } from 'bun:test'
-import { createFreeCodeServer } from '../httpServer.ts'
-import type { ServerConfig } from '../types.ts'
+import { describe, it, expect } from 'vitest'
+import { createFreeCodeServer } from '../httpServer.js'
+import type { ServerConfig } from '../types.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
