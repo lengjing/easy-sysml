@@ -211,7 +211,7 @@ describe('createOpenAICompatFetch() — URL routing', () => {
 
       const responseBody = await response.json() as Record<string, unknown>;
       expect(responseBody.type).toBe('message');
-      expect(responseBody.model).toBe('deepseek-chat');
+      expect(responseBody.model).toBe('deepseek-v4-flash');
       expect(responseBody.stop_reason).toBe('end_turn');
       expect((responseBody.content as Array<Record<string, unknown>>)[0]?.text).toBe('Hello from compat');
       expect((responseBody.usage as Record<string, unknown>).input_tokens).toBe(12);

@@ -16,8 +16,16 @@
  *   CLAUDE_CODE_USE_OPENAI_COMPAT=1
  *   OPENAI_COMPAT_BASE_URL=https://api.deepseek.com/v1   (required)
  *   OPENAI_COMPAT_API_KEY=sk-...                         (required)
- *   OPENAI_COMPAT_MODEL=deepseek-chat                    (optional)
+ *   OPENAI_COMPAT_MODEL=deepseek-v4-flash                (optional)
  */
+
+import {
+  getOpenAICompatDefaultModel,
+  getOpenAICompatModelForFamily,
+  getOpenAICompatProviderPreset,
+  normalizeOpenAICompatBaseUrl,
+  OPENAI_COMPAT_PROVIDERS,
+} from '../../utils/model/openaiCompat.js'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -50,62 +58,12 @@ interface AnthropicTool {
 
 // ── Well-known provider presets ──────────────────────────────────────
 
-export const OPENAI_COMPAT_PROVIDERS: Record<
-  string,
-  { baseUrl: string; defaultModel: string; label: string }
-> = {
-  deepseek: {
-    baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
-    label: 'DeepSeek',
-  },
-  qwen: {
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    defaultModel: 'qwen-plus',
-    label: 'Qwen (Alibaba Cloud)',
-  },
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '')
-}
-
-function getOpenAICompatProviderPreset():
-  | { key: string; baseUrl: string; defaultModel: string; label: string }
-  | null {
-  const providerKey = process.env.OPENAI_COMPAT_PROVIDER?.trim().toLowerCase()
-  if (providerKey) {
-    const preset = OPENAI_COMPAT_PROVIDERS[providerKey]
-    if (preset) {
-      return { key: providerKey, ...preset }
-    }
-  }
-
-  const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
-  if (!baseUrl) {
-    return null
-  }
-
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-  for (const [key, preset] of Object.entries(OPENAI_COMPAT_PROVIDERS)) {
-    if (normalizeBaseUrl(preset.baseUrl) === normalizedBaseUrl) {
-      return { key, ...preset }
-    }
-  }
-
-  return null
-}
-
 /**
  * Model name mapping: Claude model name → OpenAI-compatible model name.
  * Falls back to OPENAI_COMPAT_MODEL env var or 'gpt-4o' if not found.
  */
 function mapModelName(claudeModel: string | null): string {
-  const envModel = process.env.OPENAI_COMPAT_MODEL?.trim()
-  if (envModel) return envModel
-
-  const preset = getOpenAICompatProviderPreset()
-  const fallbackModel = preset?.defaultModel ?? 'deepseek-chat'
+  const fallbackModel = getOpenAICompatDefaultModel()
 
   if (!claudeModel) return fallbackModel
   const lower = claudeModel.toLowerCase()
@@ -114,9 +72,9 @@ function mapModelName(claudeModel: string | null): string {
   if (!lower.startsWith('claude')) return claudeModel
 
   // Map Claude tiers to reasonable defaults
-  if (lower.includes('opus')) return fallbackModel
-  if (lower.includes('sonnet')) return fallbackModel
-  if (lower.includes('haiku')) return fallbackModel
+  if (lower.includes('opus')) return getOpenAICompatModelForFamily('opus')
+  if (lower.includes('sonnet')) return getOpenAICompatModelForFamily('sonnet')
+  if (lower.includes('haiku')) return getOpenAICompatModelForFamily('haiku')
   return fallbackModel
 }
 
@@ -674,7 +632,7 @@ export function createOpenAICompatFetch(
   apiKey: string,
 ): typeof fetch {
   // Normalize base URL
-  const normalizedBase = normalizeBaseUrl(baseUrl)
+  const normalizedBase = normalizeOpenAICompatBaseUrl(baseUrl)
 
   const adapter = async (
     input: RequestInfo | URL,

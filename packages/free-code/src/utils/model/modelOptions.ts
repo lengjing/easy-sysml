@@ -33,6 +33,7 @@ import {
 } from './model.js'
 import { has1mContext } from '../context.js'
 import { getGlobalConfig } from '../config.js'
+import { getOpenAICompatModelOptions } from './openaiCompat.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 
@@ -237,6 +238,15 @@ function getGpt54MiniOption(): ModelOption {
   }
 }
 
+function getOpenAICompatProviderOptions(): ModelOption[] {
+  return getOpenAICompatModelOptions().map(option => ({
+    value: option.id,
+    label: option.label,
+    description: option.description,
+    descriptionForModel: option.description,
+  }))
+}
+
 function getMaxOpusOption(fastMode = false): ModelOption {
   return {
     value: 'opus',
@@ -360,6 +370,13 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
 
     standardOptions.push(MaxHaiku45Option)
     return standardOptions
+  }
+
+  if (getAPIProvider() === 'openai-compat') {
+    return [
+      getDefaultOptionForUser(fastMode),
+      ...getOpenAICompatProviderOptions(),
+    ]
   }
 
   // PAYG 1P API: Default (Sonnet) + Sonnet 1M + Opus 4.6 + Opus 1M + Haiku

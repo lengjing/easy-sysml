@@ -27,6 +27,10 @@ import { formatModelPricing, getOpus46CostTier } from '../modelCost.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
 import { getAPIProvider } from './providers.js'
+import {
+  getOpenAICompatDefaultModel,
+  getOpenAICompatModelForFamily,
+} from './openaiCompat.js'
 import { LIGHTNING_BOLT } from '../../constants/figures.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import { type ModelAlias, isModelAlias } from './aliases.js'
@@ -109,6 +113,9 @@ export function getDefaultOpusModel(): ModelName {
   if (process.env.ANTHROPIC_DEFAULT_OPUS_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
   }
+  if (getAPIProvider() === 'openai-compat') {
+    return getOpenAICompatModelForFamily('opus')
+  }
   // 3P providers (Bedrock, Vertex, Foundry) — kept as a separate branch
   // even when values match, since 3P availability lags firstParty and
   // these will diverge again at the next model launch.
@@ -123,6 +130,9 @@ export function getDefaultSonnetModel(): ModelName {
   if (process.env.ANTHROPIC_DEFAULT_SONNET_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
   }
+  if (getAPIProvider() === 'openai-compat') {
+    return getOpenAICompatDefaultModel()
+  }
   // Default to Sonnet 4.5 for 3P since they may not have 4.6 yet
   if (getAPIProvider() !== 'firstParty') {
     return getModelStrings().sonnet45
@@ -134,6 +144,10 @@ export function getDefaultSonnetModel(): ModelName {
 export function getDefaultHaikuModel(): ModelName {
   if (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+  }
+
+  if (getAPIProvider() === 'openai-compat') {
+    return getOpenAICompatModelForFamily('haiku')
   }
 
   // Haiku 4.5 is available on all platforms (first-party, Foundry, Bedrock, Vertex)
@@ -383,6 +397,12 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
   if (model === 'deepseek-reasoner') {
     return 'DeepSeek Reasoner'
   }
+  if (model === 'deepseek-v4-flash') {
+    return 'DeepSeek V4 Flash'
+  }
+  if (model === 'deepseek-v4-pro') {
+    return 'DeepSeek V4 Pro'
+  }
   if (model === 'qwen-plus') {
     return 'Qwen Plus'
   }
@@ -630,6 +650,12 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
 
   if (canonical.includes('claude-opus-4-6')) {
     return has1m ? 'Opus 4.6 (with 1M context)' : 'Opus 4.6'
+  }
+  if (canonical.includes('deepseek-v4-flash')) {
+    return 'DeepSeek V4 Flash'
+  }
+  if (canonical.includes('deepseek-v4-pro')) {
+    return 'DeepSeek V4 Pro'
   }
   if (canonical.includes('deepseek-chat')) {
     return 'DeepSeek Chat'
