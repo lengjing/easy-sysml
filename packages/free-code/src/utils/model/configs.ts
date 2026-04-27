@@ -124,6 +124,22 @@ export const GPT_5_4_MINI_CONFIG = {
 } as const satisfies ModelConfig
 
 // OpenAI-compatible native models
+export const DEEPSEEK_V4_FLASH_CONFIG = {
+  firstParty: 'deepseek-v4-flash',
+  bedrock: 'deepseek-v4-flash',
+  vertex: 'deepseek-v4-flash',
+  foundry: 'deepseek-v4-flash',
+  openai: 'deepseek-v4-flash',
+} as const satisfies ModelConfig
+
+export const DEEPSEEK_V4_PRO_CONFIG = {
+  firstParty: 'deepseek-v4-pro',
+  bedrock: 'deepseek-v4-pro',
+  vertex: 'deepseek-v4-pro',
+  foundry: 'deepseek-v4-pro',
+  openai: 'deepseek-v4-pro',
+} as const satisfies ModelConfig
+
 export const DEEPSEEK_CHAT_CONFIG = {
   firstParty: 'deepseek-chat',
   bedrock: 'deepseek-chat',
@@ -174,6 +190,8 @@ export const ALL_MODEL_CONFIGS = {
   gpt53codex: GPT_5_3_CODEX_CONFIG,
   gpt54mini: GPT_5_4_MINI_CONFIG,
   // OpenAI-compatible native models
+  deepseekV4Flash: DEEPSEEK_V4_FLASH_CONFIG,
+  deepseekV4Pro: DEEPSEEK_V4_PRO_CONFIG,
   deepseekChat: DEEPSEEK_CHAT_CONFIG,
   deepseekReasoner: DEEPSEEK_REASONER_CONFIG,
   qwenPlus: QWEN_PLUS_CONFIG,

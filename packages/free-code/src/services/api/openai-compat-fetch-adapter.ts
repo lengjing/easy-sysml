@@ -16,8 +16,16 @@
  *   CLAUDE_CODE_USE_OPENAI_COMPAT=1
  *   OPENAI_COMPAT_BASE_URL=https://api.deepseek.com/v1   (required)
  *   OPENAI_COMPAT_API_KEY=sk-...                         (required)
- *   OPENAI_COMPAT_MODEL=deepseek-chat                    (optional)
+ *   OPENAI_COMPAT_MODEL=deepseek-v4-flash                (optional)
  */
+
+import {
+  getOpenAICompatDefaultModel,
+  getOpenAICompatModelForFamily,
+  getOpenAICompatProviderPreset,
+  normalizeOpenAICompatBaseUrl,
+  OPENAI_COMPAT_PROVIDERS,
+} from '../../utils/model/openaiCompat.js'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -50,62 +58,12 @@ interface AnthropicTool {
 
 // ── Well-known provider presets ──────────────────────────────────────
 
-export const OPENAI_COMPAT_PROVIDERS: Record<
-  string,
-  { baseUrl: string; defaultModel: string; label: string }
-> = {
-  deepseek: {
-    baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
-    label: 'DeepSeek',
-  },
-  qwen: {
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    defaultModel: 'qwen-plus',
-    label: 'Qwen (Alibaba Cloud)',
-  },
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '')
-}
-
-function getOpenAICompatProviderPreset():
-  | { key: string; baseUrl: string; defaultModel: string; label: string }
-  | null {
-  const providerKey = process.env.OPENAI_COMPAT_PROVIDER?.trim().toLowerCase()
-  if (providerKey) {
-    const preset = OPENAI_COMPAT_PROVIDERS[providerKey]
-    if (preset) {
-      return { key: providerKey, ...preset }
-    }
-  }
-
-  const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
-  if (!baseUrl) {
-    return null
-  }
-
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-  for (const [key, preset] of Object.entries(OPENAI_COMPAT_PROVIDERS)) {
-    if (normalizeBaseUrl(preset.baseUrl) === normalizedBaseUrl) {
-      return { key, ...preset }
-    }
-  }
-
-  return null
-}
-
 /**
  * Model name mapping: Claude model name → OpenAI-compatible model name.
  * Falls back to OPENAI_COMPAT_MODEL env var or 'gpt-4o' if not found.
  */
 function mapModelName(claudeModel: string | null): string {
-  const envModel = process.env.OPENAI_COMPAT_MODEL?.trim()
-  if (envModel) return envModel
-
-  const preset = getOpenAICompatProviderPreset()
-  const fallbackModel = preset?.defaultModel ?? 'deepseek-chat'
+  const fallbackModel = getOpenAICompatDefaultModel()
 
   if (!claudeModel) return fallbackModel
   const lower = claudeModel.toLowerCase()
@@ -114,9 +72,9 @@ function mapModelName(claudeModel: string | null): string {
   if (!lower.startsWith('claude')) return claudeModel
 
   // Map Claude tiers to reasonable defaults
-  if (lower.includes('opus')) return fallbackModel
-  if (lower.includes('sonnet')) return fallbackModel
-  if (lower.includes('haiku')) return fallbackModel
+  if (lower.includes('opus')) return getOpenAICompatModelForFamily('opus')
+  if (lower.includes('sonnet')) return getOpenAICompatModelForFamily('sonnet')
+  if (lower.includes('haiku')) return getOpenAICompatModelForFamily('haiku')
   return fallbackModel
 }
 
@@ -163,13 +121,20 @@ function translateMessages(
     if (!Array.isArray(msg.content)) continue
 
     if (msg.role === 'assistant') {
-      // Collect text and tool_use blocks
+      // Collect text, thinking, and tool_use blocks
       const textParts: string[] = []
+      const reasoningParts: string[] = []
       const toolCalls: Array<Record<string, unknown>> = []
 
       for (const block of msg.content) {
         if (block.type === 'text' && typeof block.text === 'string') {
           textParts.push(block.text)
+        } else if (
+          block.type === 'thinking' &&
+          typeof block.thinking === 'string' &&
+          block.thinking.length > 0
+        ) {
+          reasoningParts.push(block.thinking)
         } else if (block.type === 'tool_use') {
           toolCalls.push({
             id: block.id ?? nextToolCallId(),
@@ -186,6 +151,9 @@ function translateMessages(
 
       const assistantMsg: Record<string, unknown> = { role: 'assistant' }
       assistantMsg.content = textParts.join('\n') || null
+      if (reasoningParts.length > 0) {
+        assistantMsg.reasoning_content = reasoningParts.join('\n')
+      }
       if (toolCalls.length > 0) {
         assistantMsg.tool_calls = toolCalls
       }
@@ -260,6 +228,16 @@ function translateNonStreamingToAnthropic(
   const usage = (openAIResponseBody.usage as Record<string, unknown> | undefined) ?? {}
 
   const content: AnthropicContentBlock[] = []
+
+  if (
+    typeof message.reasoning_content === 'string' &&
+    message.reasoning_content.length > 0
+  ) {
+    content.push({
+      type: 'thinking',
+      thinking: message.reasoning_content,
+    })
+  }
 
   if (typeof message.content === 'string' && message.content.length > 0) {
     content.push({ type: 'text', text: message.content })
@@ -354,12 +332,60 @@ async function translateStreamToAnthropic(
       )
 
       let contentBlockIdx = 0
-      let textBlockOpen = false
+      let currentContentBlock:
+        | { type: 'text' | 'thinking'; index: number }
+        | null = null
       // Track tool call blocks: toolCallIndex → { id, name, args, blockIdx }
       const toolCallBlocks = new Map<
         number,
         { id: string; name: string; blockIdx: number }
       >()
+
+      const closeCurrentContentBlock = () => {
+        if (!currentContentBlock) {
+          return
+        }
+
+        controller.enqueue(
+          enc.encode(
+            encodeSSE(
+              'content_block_stop',
+              JSON.stringify({
+                type: 'content_block_stop',
+                index: currentContentBlock.index,
+              }),
+            ),
+          ),
+        )
+        contentBlockIdx = currentContentBlock.index + 1
+        currentContentBlock = null
+      }
+
+      const ensureContentBlock = (type: 'text' | 'thinking'): number => {
+        if (currentContentBlock?.type === type) {
+          return currentContentBlock.index
+        }
+
+        closeCurrentContentBlock()
+        const index = contentBlockIdx
+        controller.enqueue(
+          enc.encode(
+            encodeSSE(
+              'content_block_start',
+              JSON.stringify({
+                type: 'content_block_start',
+                index,
+                content_block:
+                  type === 'text'
+                    ? { type: 'text', text: '' }
+                    : { type: 'thinking', thinking: '' },
+              }),
+            ),
+          ),
+        )
+        currentContentBlock = { type, index }
+        return index
+      }
 
       const reader = openAIResponse.body?.getReader()
       if (!reader) {
@@ -422,28 +448,14 @@ async function translateStreamToAnthropic(
 
               // ── Text content ───────────────────────────────────
               if (typeof delta.content === 'string' && delta.content.length > 0) {
-                if (!textBlockOpen) {
-                  controller.enqueue(
-                    enc.encode(
-                      encodeSSE(
-                        'content_block_start',
-                        JSON.stringify({
-                          type: 'content_block_start',
-                          index: contentBlockIdx,
-                          content_block: { type: 'text', text: '' },
-                        }),
-                      ),
-                    ),
-                  )
-                  textBlockOpen = true
-                }
+                const textBlockIdx = ensureContentBlock('text')
                 controller.enqueue(
                   enc.encode(
                     encodeSSE(
                       'content_block_delta',
                       JSON.stringify({
                         type: 'content_block_delta',
-                        index: contentBlockIdx,
+                        index: textBlockIdx,
                         delta: { type: 'text_delta', text: delta.content },
                       }),
                     ),
@@ -457,29 +469,14 @@ async function translateStreamToAnthropic(
                 ((delta as Record<string, unknown>).reasoning_content as string).length > 0
               ) {
                 const thinkingText = (delta as Record<string, unknown>).reasoning_content as string
-                // Emit as a thinking block if no text block open
-                if (!textBlockOpen) {
-                  controller.enqueue(
-                    enc.encode(
-                      encodeSSE(
-                        'content_block_start',
-                        JSON.stringify({
-                          type: 'content_block_start',
-                          index: contentBlockIdx,
-                          content_block: { type: 'thinking', thinking: '' },
-                        }),
-                      ),
-                    ),
-                  )
-                  textBlockOpen = true
-                }
+                const thinkingBlockIdx = ensureContentBlock('thinking')
                 controller.enqueue(
                   enc.encode(
                     encodeSSE(
                       'content_block_delta',
                       JSON.stringify({
                         type: 'content_block_delta',
-                        index: contentBlockIdx,
+                        index: thinkingBlockIdx,
                         delta: { type: 'thinking_delta', thinking: thinkingText },
                       }),
                     ),
@@ -495,21 +492,7 @@ async function translateStreamToAnthropic(
 
                 if (tcDelta.id !== undefined) {
                   // New tool call starting
-                  if (textBlockOpen) {
-                    controller.enqueue(
-                      enc.encode(
-                        encodeSSE(
-                          'content_block_stop',
-                          JSON.stringify({
-                            type: 'content_block_stop',
-                            index: contentBlockIdx,
-                          }),
-                        ),
-                      ),
-                    )
-                    contentBlockIdx++
-                    textBlockOpen = false
-                  }
+                  closeCurrentContentBlock()
 
                   const toolBlockIdx = contentBlockIdx
                   toolCallBlocks.set(tcIdx, {
@@ -560,20 +543,7 @@ async function translateStreamToAnthropic(
 
               // ── Finish reason ──────────────────────────────────
               if (choice.finish_reason) {
-                if (textBlockOpen) {
-                  controller.enqueue(
-                    enc.encode(
-                      encodeSSE(
-                        'content_block_stop',
-                        JSON.stringify({
-                          type: 'content_block_stop',
-                          index: contentBlockIdx,
-                        }),
-                      ),
-                    ),
-                  )
-                  textBlockOpen = false
-                }
+                closeCurrentContentBlock()
                 // Close all open tool call blocks
                 for (const tc of toolCallBlocks.values()) {
                   controller.enqueue(
@@ -605,16 +575,7 @@ async function translateStreamToAnthropic(
       }
 
       // Ensure stream is finished even if we didn't see finish_reason
-      if (textBlockOpen) {
-        controller.enqueue(
-          enc.encode(
-            encodeSSE(
-              'content_block_stop',
-              JSON.stringify({ type: 'content_block_stop', index: contentBlockIdx }),
-            ),
-          ),
-        )
-      }
+      closeCurrentContentBlock()
       finishStream(controller, enc, contentBlockIdx, false)
       controller.close()
     },
@@ -674,7 +635,7 @@ export function createOpenAICompatFetch(
   apiKey: string,
 ): typeof fetch {
   // Normalize base URL
-  const normalizedBase = normalizeBaseUrl(baseUrl)
+  const normalizedBase = normalizeOpenAICompatBaseUrl(baseUrl)
 
   const adapter = async (
     input: RequestInfo | URL,

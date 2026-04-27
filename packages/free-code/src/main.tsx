@@ -545,11 +545,11 @@ type PendingConnect = {
   authToken: string | undefined;
   dangerouslySkipPermissions: boolean;
 };
-const _pendingConnect: PendingConnect | undefined = feature('DIRECT_CONNECT') ? {
+const _pendingConnect: PendingConnect | undefined = {
   url: undefined,
   authToken: undefined,
   dangerouslySkipPermissions: false
-} : undefined;
+};
 
 // Set by early argv processing when `claude assistant [sessionId]` is detected
 type PendingAssistantChat = {
@@ -582,6 +582,39 @@ const _pendingSSH: PendingSSH | undefined = feature('SSH_REMOTE') ? {
   local: false,
   extraCliArgs: []
 } : undefined;
+
+async function runDirectConnectHeadlessCommand(ccUrl: string, prompt: string, outputFormat: string) {
+  const {
+    parseConnectUrl
+  } = await import('./server/parseConnectUrl.js');
+  const {
+    runConnectHeadless
+  } = await import('./server/connectHeadless.js');
+  const {
+    serverUrl,
+    authToken
+  } = parseConnectUrl(ccUrl);
+  let connectConfig;
+  try {
+    const session = await createDirectConnectSession({
+      serverUrl,
+      authToken,
+      cwd: getOriginalCwd(),
+      dangerouslySkipPermissions: _pendingConnect?.dangerouslySkipPermissions
+    });
+    if (session.workDir) {
+      setOriginalCwd(session.workDir);
+      setCwdState(session.workDir);
+    }
+    setDirectConnectServerUrl(serverUrl);
+    connectConfig = session.config;
+  } catch (err) {
+    // biome-ignore lint/suspicious/noConsole: intentional error output
+    console.error(err instanceof DirectConnectError ? err.message : String(err));
+    process.exit(1);
+  }
+  await runConnectHeadless(connectConfig, prompt, outputFormat, true);
+}
 export async function main() {
   profileCheckpoint('main_function_start');
 
@@ -609,36 +642,68 @@ export async function main() {
   // Check for cc:// or cc+unix:// URL in argv — rewrite so the main command
   // handles it, giving the full interactive TUI instead of a stripped-down subcommand.
   // For headless (-p), we rewrite to the internal `open` subcommand.
-  if (feature('DIRECT_CONNECT')) {
-    const rawCliArgs = process.argv.slice(2);
-    const ccIdx = rawCliArgs.findIndex(a => a.startsWith('cc://') || a.startsWith('cc+unix://'));
-    if (ccIdx !== -1 && _pendingConnect) {
-      const ccUrl = rawCliArgs[ccIdx]!;
-      const {
-        parseConnectUrl
-      } = await import('./server/parseConnectUrl.js');
-      const parsed = parseConnectUrl(ccUrl);
-      _pendingConnect.dangerouslySkipPermissions = rawCliArgs.includes('--dangerously-skip-permissions');
-      if (rawCliArgs.includes('-p') || rawCliArgs.includes('--print')) {
-        // Headless: rewrite to internal `open` subcommand
-        const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
-        const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
-        if (dspIdx !== -1) {
-          stripped.splice(dspIdx, 1);
-        }
-        process.argv = [process.argv[0]!, process.argv[1]!, 'open', ccUrl, ...stripped];
-      } else {
-        // Interactive: strip cc:// URL and flags, run main command
-        _pendingConnect.url = parsed.serverUrl;
-        _pendingConnect.authToken = parsed.authToken;
-        const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
-        const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
-        if (dspIdx !== -1) {
-          stripped.splice(dspIdx, 1);
-        }
-        process.argv = [process.argv[0]!, process.argv[1]!, ...stripped];
+  const rawCliArgs = process.argv.slice(2);
+  const ccIdx = rawCliArgs.findIndex(a => a.startsWith('cc://') || a.startsWith('cc+unix://'));
+  if (ccIdx !== -1 && _pendingConnect) {
+    const ccUrl = rawCliArgs[ccIdx]!;
+    const {
+      parseConnectUrl
+    } = await import('./server/parseConnectUrl.js');
+    const parsed = parseConnectUrl(ccUrl);
+    _pendingConnect.dangerouslySkipPermissions = rawCliArgs.includes('--dangerously-skip-permissions');
+    if (rawCliArgs.includes('-p') || rawCliArgs.includes('--print')) {
+      // Headless: rewrite to internal `open` subcommand
+      const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
+      const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
+      if (dspIdx !== -1) {
+        stripped.splice(dspIdx, 1);
       }
+      process.argv = [process.argv[0]!, process.argv[1]!, 'open', ccUrl, ...stripped];
+    } else {
+      // Interactive: strip cc:// URL and flags, run main command
+      _pendingConnect.url = parsed.serverUrl;
+      _pendingConnect.authToken = parsed.authToken;
+      const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
+      const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
+      if (dspIdx !== -1) {
+        stripped.splice(dspIdx, 1);
+      }
+      process.argv = [process.argv[0]!, process.argv[1]!, ...stripped];
     }
+  }
+
+  const maybeOpenArgs = process.argv.slice(2);
+  if (maybeOpenArgs[0] === 'open' && maybeOpenArgs[1] && !maybeOpenArgs.includes('--help') && !maybeOpenArgs.includes('-h')) {
+    const ccUrl = maybeOpenArgs[1]!;
+    const extraArgs = maybeOpenArgs.slice(2);
+    let outputFormat = 'text';
+    const promptParts: string[] = [];
+
+    for (let i = 0; i < extraArgs.length; i += 1) {
+      const arg = extraArgs[i]!;
+      if (arg === '-p' || arg === '--print') {
+        continue;
+      }
+      if (arg === '--dangerously-skip-permissions') {
+        if (_pendingConnect) {
+          _pendingConnect.dangerouslySkipPermissions = true;
+        }
+        continue;
+      }
+      if (arg === '--output-format' && extraArgs[i + 1]) {
+        outputFormat = extraArgs[i + 1]!;
+        i += 1;
+        continue;
+      }
+      if (arg.startsWith('--output-format=')) {
+        outputFormat = arg.slice('--output-format='.length);
+        continue;
+      }
+      promptParts.push(arg);
+    }
+
+    await runDirectConnectHeadlessCommand(ccUrl, promptParts.join(' '), outputFormat);
+    return;
   }
 
   // Handle deep link URIs early — this is invoked by the OS protocol handler
@@ -3153,7 +3218,7 @@ async function run(): Promise<CommanderCommand> {
         logError(error);
         process.exit(1);
       }
-    } else if (feature('DIRECT_CONNECT') && _pendingConnect?.url) {
+    } else if (_pendingConnect?.url) {
       // `claude connect <url>` — full interactive TUI connected to a remote server
       let directConnectConfig;
       try {
@@ -3958,8 +4023,7 @@ async function run(): Promise<CommanderCommand> {
   });
 
   // claude server
-  if (feature('DIRECT_CONNECT')) {
-    program.command('server').description('Start a Claude Code session server').option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').action(async (opts: {
+  program.command('server').description('Start a Claude Code session server').option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').action(async (opts: {
       port: string;
       host: string;
       authToken?: string;
@@ -4012,7 +4076,7 @@ async function run(): Promise<CommanderCommand> {
         maxSessions: config.maxSessions
       });
       const logger = createServerLogger();
-      const server = startServer(config, sessionManager, logger);
+      const server = await startServer(config, sessionManager, logger);
       const actualPort = server.port ?? config.port;
       printBanner(config, authToken, actualPort);
       await writeServerLock({
@@ -4035,7 +4099,6 @@ async function run(): Promise<CommanderCommand> {
       process.once('SIGINT', () => void shutdown());
       process.once('SIGTERM', () => void shutdown());
     });
-  }
 
   // `claude ssh <host> [dir]` — registered here only so --help shows it.
   // The actual interactive flow is handled by early argv rewriting in main()
@@ -4055,45 +4118,41 @@ async function run(): Promise<CommanderCommand> {
   // claude connect — subcommand only handles -p (headless) mode.
   // Interactive mode (without -p) is handled by early argv rewriting in main()
   // which redirects to the main command with full TUI support.
-  if (feature('DIRECT_CONNECT')) {
-    program.command('open <cc-url>').description('Connect to a Claude Code server (internal — use cc:// URLs)').option('-p, --print [prompt]', 'Print mode (headless)').option('--output-format <format>', 'Output format: text, json, stream-json', 'text').action(async (ccUrl: string, opts: {
-      print?: string | boolean;
-      outputFormat: string;
-    }) => {
-      const {
-        parseConnectUrl
-      } = await import('./server/parseConnectUrl.js');
-      const {
+  program.command('open <cc-url> [prompt]').description('Connect to a Claude Code server (internal — use cc:// URLs)').option('-p, --print', 'Print mode (headless)').option('--output-format <format>', 'Output format: text, json, stream-json', 'text').action(async (ccUrl: string, promptArg: string | undefined, opts: {
+    outputFormat: string;
+    print?: boolean;
+  }) => {
+    const {
+      parseConnectUrl
+    } = await import('./server/parseConnectUrl.js');
+    const {
+      serverUrl,
+      authToken
+    } = parseConnectUrl(ccUrl);
+    let connectConfig;
+    try {
+      const session = await createDirectConnectSession({
         serverUrl,
-        authToken
-      } = parseConnectUrl(ccUrl);
-      let connectConfig;
-      try {
-        const session = await createDirectConnectSession({
-          serverUrl,
-          authToken,
-          cwd: getOriginalCwd(),
-          dangerouslySkipPermissions: _pendingConnect?.dangerouslySkipPermissions
-        });
-        if (session.workDir) {
-          setOriginalCwd(session.workDir);
-          setCwdState(session.workDir);
-        }
-        setDirectConnectServerUrl(serverUrl);
-        connectConfig = session.config;
-      } catch (err) {
-        // biome-ignore lint/suspicious/noConsole: intentional error output
-        console.error(err instanceof DirectConnectError ? err.message : String(err));
-        process.exit(1);
+        authToken,
+        cwd: getOriginalCwd(),
+        dangerouslySkipPermissions: _pendingConnect?.dangerouslySkipPermissions
+      });
+      if (session.workDir) {
+        setOriginalCwd(session.workDir);
+        setCwdState(session.workDir);
       }
-      const {
-        runConnectHeadless
-      } = await import('./server/connectHeadless.js');
-      const prompt = typeof opts.print === 'string' ? opts.print : '';
-      const interactive = opts.print === true;
-      await runConnectHeadless(connectConfig, prompt, opts.outputFormat, interactive);
-    });
-  }
+      setDirectConnectServerUrl(serverUrl);
+      connectConfig = session.config;
+    } catch (err) {
+      // biome-ignore lint/suspicious/noConsole: intentional error output
+      console.error(err instanceof DirectConnectError ? err.message : String(err));
+      process.exit(1);
+    }
+    const {
+      runConnectHeadless
+    } = await import('./server/connectHeadless.js');
+    await runConnectHeadless(connectConfig, promptArg ?? '', opts.outputFormat, opts.print === true);
+  });
 
   // claude auth
 

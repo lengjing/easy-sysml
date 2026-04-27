@@ -13,10 +13,10 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-  OPENAI_COMPAT_PROVIDERS,
   getOpenAICompatFetch,
   createOpenAICompatFetch,
 } from '../openai-compat-fetch-adapter.ts';
+import { OPENAI_COMPAT_PROVIDERS } from '../../../utils/model/openaiCompat.js';
 
 function asFetch(
   fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
@@ -211,7 +211,7 @@ describe('createOpenAICompatFetch() — URL routing', () => {
 
       const responseBody = await response.json() as Record<string, unknown>;
       expect(responseBody.type).toBe('message');
-      expect(responseBody.model).toBe('deepseek-chat');
+      expect(responseBody.model).toBe('deepseek-v4-flash');
       expect(responseBody.stop_reason).toBe('end_turn');
       expect((responseBody.content as Array<Record<string, unknown>>)[0]?.text).toBe('Hello from compat');
       expect((responseBody.usage as Record<string, unknown>).input_tokens).toBe(12);
@@ -341,6 +341,30 @@ describe('Message translation via createOpenAICompatFetch', () => {
     const toolCall = (assistantMsg?.tool_calls as Array<Record<string, unknown>>)[0];
     expect(toolCall.id).toBe('call_123');
     expect((toolCall.function as Record<string, unknown>).name).toBe('my_tool');
+  });
+
+  it('preserves assistant thinking blocks as reasoning_content', async () => {
+    const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
+    await adapter('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'claude-sonnet',
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'step by step' },
+              { type: 'text', text: 'final answer' },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const messages = capturedBody?.messages as Array<Record<string, unknown>>;
+    const assistantMsg = messages.find(m => m.role === 'assistant');
+    expect(assistantMsg?.content).toBe('final answer');
+    expect(assistantMsg?.reasoning_content).toBe('step by step');
   });
 
   it('translates tool_result (user) message to tool role', async () => {
@@ -513,6 +537,51 @@ describe('Error handling', () => {
       const body = await response.json() as { error?: Record<string, unknown> };
       expect(body.error).toBeDefined();
       expect(typeof (body.error as Record<string, unknown>).message).toBe('string');
+    } finally {
+      globalThis.fetch = mockFetch;
+    }
+  });
+});
+
+describe('Streaming reasoning translation', () => {
+  it('opens separate thinking and text blocks for reasoning_content streams', async () => {
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = asFetch(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      const stream = new ReadableStream({
+        start(controller) {
+          const enc = new TextEncoder();
+          controller.enqueue(enc.encode('data: {"choices":[{"delta":{"reasoning_content":"step 1"}}]}\n\n'));
+          controller.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'));
+          controller.enqueue(enc.encode('data: {"choices":[{"finish_reason":"stop"}]}\n\n'));
+          controller.enqueue(enc.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+
+    try {
+      const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
+      const response = await adapter('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'claude-sonnet',
+          stream: true,
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      });
+
+      const sse = await response.text();
+      expect(sse).toContain('"content_block":{"type":"thinking","thinking":""}');
+      expect(sse).toContain('"delta":{"type":"thinking_delta","thinking":"step 1"}');
+      expect(sse).toContain('"content_block":{"type":"text","text":""}');
+      expect(sse).toContain('"delta":{"type":"text_delta","text":"ok"}');
+      expect(sse).toContain('"index":0');
+      expect(sse).toContain('"index":1');
     } finally {
       globalThis.fetch = mockFetch;
     }

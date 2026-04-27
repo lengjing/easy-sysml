@@ -115,34 +115,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Fast-path for `claude serve`: start HTTP + WebSocket server.
-  // Exposes the free-code agent over HTTP/WS so it can be called programmatically.
-  if (args[0] === 'serve') {
-    profileCheckpoint('cli_serve_path');
-    const serveArgs = args.slice(1);
-    let port: number | undefined;
-    let host: string | undefined;
-    let authToken: string | undefined;
-    let maxSessions: number | undefined;
-    let workspace: string | undefined;
-    for (let i = 0; i < serveArgs.length; i++) {
-      const a = serveArgs[i];
-      if (a === '--port' || a === '-P') { port = Number(serveArgs[++i]); }
-      else if (a?.startsWith('--port=')) { port = Number(a.slice(7)); }
-      else if (a === '--host' || a === '-H') { host = serveArgs[++i]; }
-      else if (a?.startsWith('--host=')) { host = a.slice(7); }
-      else if (a === '--auth-token') { authToken = serveArgs[++i]; }
-      else if (a?.startsWith('--auth-token=')) { authToken = a.slice(13); }
-      else if (a === '--max-sessions') { maxSessions = Number(serveArgs[++i]); }
-      else if (a?.startsWith('--max-sessions=')) { maxSessions = Number(a.slice(15)); }
-      else if (a === '--workspace') { workspace = serveArgs[++i]; }
-      else if (a?.startsWith('--workspace=')) { workspace = a.slice(12); }
-    }
-    const { serveMain } = await import('../server/httpServer.js');
-    await serveMain({ port, host, authToken, maxSessions, workspace });
-    return;
-  }
-
   // Fast-path for `claude remote-control` (also accepts legacy `claude remote` / `claude sync` / `claude bridge`):
   // serve local machine as bridge environment.
   // feature() must stay inline for build-time dead code elimination;

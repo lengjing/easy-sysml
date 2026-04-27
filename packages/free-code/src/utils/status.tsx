@@ -11,6 +11,7 @@ import { getDisplayPath } from './file.js';
 import { formatNumber } from './format.js';
 import { getIdeClientName, type IDEExtensionInstallationStatus, isJetBrainsIde, toIDEDisplayName } from './ide.js';
 import { getClaudeAiUserDefaultModelDescription, modelDisplayString } from './model/model.js';
+import { getOpenAICompatProviderPreset } from './model/openaiCompat.js';
 import { getAPIProvider } from './model/providers.js';
 import { getMTLSConfig } from './mtls.js';
 import { checkInstall } from './nativeInstaller/index.js';
@@ -244,7 +245,9 @@ export function buildAPIProviderProperties(): Property[] {
     const providerLabel = {
       bedrock: 'AWS Bedrock',
       vertex: 'Google Vertex AI',
-      foundry: 'Microsoft Foundry'
+      foundry: 'Microsoft Foundry',
+      openai: 'OpenAI',
+      'openai-compat': getOpenAICompatProviderPreset()?.label ?? 'OpenAI-Compatible'
     }[apiProvider];
     properties.push({
       label: 'API provider',
@@ -318,6 +321,15 @@ export function buildAPIProviderProperties(): Property[] {
     if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH)) {
       properties.push({
         value: 'Microsoft Foundry auth skipped'
+      });
+    }
+  } else if (apiProvider === 'openai-compat') {
+    const preset = getOpenAICompatProviderPreset();
+    const compatBaseUrl = process.env.OPENAI_COMPAT_BASE_URL ?? preset?.baseUrl;
+    if (compatBaseUrl) {
+      properties.push({
+        label: 'OpenAI-compatible base URL',
+        value: compatBaseUrl
       });
     }
   }
