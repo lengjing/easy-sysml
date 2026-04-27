@@ -377,6 +377,19 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
     return model
   }
 
+  if (model === 'deepseek-chat') {
+    return 'DeepSeek Chat'
+  }
+  if (model === 'deepseek-reasoner') {
+    return 'DeepSeek Reasoner'
+  }
+  if (model === 'qwen-plus') {
+    return 'Qwen Plus'
+  }
+  if (model === 'qwen-max') {
+    return 'Qwen Max'
+  }
+
   switch (model) {
     case getModelStrings().opus46:
       return 'Opus 4.6'
@@ -617,6 +630,18 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
 
   if (canonical.includes('claude-opus-4-6')) {
     return has1m ? 'Opus 4.6 (with 1M context)' : 'Opus 4.6'
+  }
+  if (canonical.includes('deepseek-chat')) {
+    return 'DeepSeek Chat'
+  }
+  if (canonical.includes('deepseek-reasoner')) {
+    return 'DeepSeek Reasoner'
+  }
+  if (canonical.includes('qwen-plus')) {
+    return 'Qwen Plus'
+  }
+  if (canonical.includes('qwen-max')) {
+    return 'Qwen Max'
   }
   if (canonical.includes('claude-opus-4-5')) {
     return 'Opus 4.5'

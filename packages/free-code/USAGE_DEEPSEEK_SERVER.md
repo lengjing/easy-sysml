@@ -61,10 +61,16 @@ Claude Code CLI
 
 ```bash
 export CLAUDE_CODE_USE_OPENAI_COMPAT=1
-export OPENAI_COMPAT_BASE_URL=https://api.deepseek.com/v1
+export OPENAI_COMPAT_PROVIDER=deepseek
 export OPENAI_COMPAT_API_KEY=sk-your-deepseek-api-key
 # 可选：指定模型（默认 deepseek-chat）
 export OPENAI_COMPAT_MODEL=deepseek-chat
+```
+
+如果不使用内置 preset，也可以继续显式设置：
+
+```bash
+export OPENAI_COMPAT_BASE_URL=https://api.deepseek.com/v1
 ```
 
 #### 步骤 3：正常使用 Claude Code
@@ -99,9 +105,10 @@ export ANTHROPIC_API_KEY=dummy
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `CLAUDE_CODE_USE_OPENAI_COMPAT` | ✅ | 设置为 `1` 启用适配器 |
-| `OPENAI_COMPAT_BASE_URL` | ✅ | OpenAI 兼容 API 的 base URL（含 `/v1`） |
+| `OPENAI_COMPAT_PROVIDER` | ❌ | 预设提供商名称，当前支持 `deepseek`、`qwen` |
+| `OPENAI_COMPAT_BASE_URL` | 条件必填 | OpenAI 兼容 API 的 base URL（含 `/v1`）；未使用 `OPENAI_COMPAT_PROVIDER` 时必填 |
 | `OPENAI_COMPAT_API_KEY` | ✅ | API Key |
-| `OPENAI_COMPAT_MODEL` | ❌ | 目标模型名称（覆盖自动映射） |
+| `OPENAI_COMPAT_MODEL` | ❌ | 目标模型名称（覆盖 preset 或自动映射） |
 
 ### DeepSeek 模型列表
 
@@ -118,7 +125,7 @@ export OPENAI_COMPAT_MODEL=deepseek-reasoner
 
 ```bash
 export CLAUDE_CODE_USE_OPENAI_COMPAT=1
-export OPENAI_COMPAT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export OPENAI_COMPAT_PROVIDER=qwen
 export OPENAI_COMPAT_API_KEY=sk-your-qwen-api-key
 export OPENAI_COMPAT_MODEL=qwen-max
 

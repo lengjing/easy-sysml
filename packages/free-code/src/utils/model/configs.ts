@@ -1,7 +1,11 @@
 import type { ModelName } from './model.js'
 import type { APIProvider } from './providers.js'
 
-export type ModelConfig = Record<APIProvider, ModelName>
+type StaticModelProvider = Exclude<APIProvider, 'openai-compat'>
+
+// OpenAI-compat model routing is provider-preset-dependent (DeepSeek/Qwen/etc.),
+// so this table only captures the static provider IDs.
+export type ModelConfig = Record<StaticModelProvider, ModelName>
 
 // @[MODEL LAUNCH]: Add a new CLAUDE_*_CONFIG constant here. Double check the correct model strings
 // here since the pattern may change.
@@ -119,6 +123,39 @@ export const GPT_5_4_MINI_CONFIG = {
   openai: 'gpt-5.4-mini',
 } as const satisfies ModelConfig
 
+// OpenAI-compatible native models
+export const DEEPSEEK_CHAT_CONFIG = {
+  firstParty: 'deepseek-chat',
+  bedrock: 'deepseek-chat',
+  vertex: 'deepseek-chat',
+  foundry: 'deepseek-chat',
+  openai: 'deepseek-chat',
+} as const satisfies ModelConfig
+
+export const DEEPSEEK_REASONER_CONFIG = {
+  firstParty: 'deepseek-reasoner',
+  bedrock: 'deepseek-reasoner',
+  vertex: 'deepseek-reasoner',
+  foundry: 'deepseek-reasoner',
+  openai: 'deepseek-reasoner',
+} as const satisfies ModelConfig
+
+export const QWEN_PLUS_CONFIG = {
+  firstParty: 'qwen-plus',
+  bedrock: 'qwen-plus',
+  vertex: 'qwen-plus',
+  foundry: 'qwen-plus',
+  openai: 'qwen-plus',
+} as const satisfies ModelConfig
+
+export const QWEN_MAX_CONFIG = {
+  firstParty: 'qwen-max',
+  bedrock: 'qwen-max',
+  vertex: 'qwen-max',
+  foundry: 'qwen-max',
+  openai: 'qwen-max',
+} as const satisfies ModelConfig
+
 // @[MODEL LAUNCH]: Register the new config here.
 export const ALL_MODEL_CONFIGS = {
   haiku35: CLAUDE_3_5_HAIKU_CONFIG,
@@ -136,6 +173,11 @@ export const ALL_MODEL_CONFIGS = {
   gpt54: GPT_5_4_CONFIG,
   gpt53codex: GPT_5_3_CODEX_CONFIG,
   gpt54mini: GPT_5_4_MINI_CONFIG,
+  // OpenAI-compatible native models
+  deepseekChat: DEEPSEEK_CHAT_CONFIG,
+  deepseekReasoner: DEEPSEEK_REASONER_CONFIG,
+  qwenPlus: QWEN_PLUS_CONFIG,
+  qwenMax: QWEN_MAX_CONFIG,
 } as const satisfies Record<string, ModelConfig>
 
 export type ModelKey = keyof typeof ALL_MODEL_CONFIGS

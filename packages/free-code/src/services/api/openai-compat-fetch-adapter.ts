@@ -66,25 +66,58 @@ export const OPENAI_COMPAT_PROVIDERS: Record<
   },
 }
 
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '')
+}
+
+function getOpenAICompatProviderPreset():
+  | { key: string; baseUrl: string; defaultModel: string; label: string }
+  | null {
+  const providerKey = process.env.OPENAI_COMPAT_PROVIDER?.trim().toLowerCase()
+  if (providerKey) {
+    const preset = OPENAI_COMPAT_PROVIDERS[providerKey]
+    if (preset) {
+      return { key: providerKey, ...preset }
+    }
+  }
+
+  const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
+  if (!baseUrl) {
+    return null
+  }
+
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+  for (const [key, preset] of Object.entries(OPENAI_COMPAT_PROVIDERS)) {
+    if (normalizeBaseUrl(preset.baseUrl) === normalizedBaseUrl) {
+      return { key, ...preset }
+    }
+  }
+
+  return null
+}
+
 /**
  * Model name mapping: Claude model name → OpenAI-compatible model name.
  * Falls back to OPENAI_COMPAT_MODEL env var or 'gpt-4o' if not found.
  */
 function mapModelName(claudeModel: string | null): string {
-  const envModel = process.env.OPENAI_COMPAT_MODEL
+  const envModel = process.env.OPENAI_COMPAT_MODEL?.trim()
   if (envModel) return envModel
 
-  if (!claudeModel) return 'gpt-4o'
+  const preset = getOpenAICompatProviderPreset()
+  const fallbackModel = preset?.defaultModel ?? 'deepseek-chat'
+
+  if (!claudeModel) return fallbackModel
   const lower = claudeModel.toLowerCase()
 
   // If already looks like an OpenAI-compat model, pass through
   if (!lower.startsWith('claude')) return claudeModel
 
   // Map Claude tiers to reasonable defaults
-  if (lower.includes('opus')) return 'deepseek-chat'
-  if (lower.includes('sonnet')) return 'deepseek-chat'
-  if (lower.includes('haiku')) return 'deepseek-chat'
-  return 'deepseek-chat'
+  if (lower.includes('opus')) return fallbackModel
+  if (lower.includes('sonnet')) return fallbackModel
+  if (lower.includes('haiku')) return fallbackModel
+  return fallbackModel
 }
 
 // ── Counter for deterministic tool call IDs ──────────────────────────
@@ -212,6 +245,70 @@ function translateMessages(
 
 function encodeSSE(event: string, data: string): string {
   return `event: ${event}\ndata: ${data}\n\n`
+}
+
+function translateNonStreamingToAnthropic(
+  openAIResponseBody: Record<string, unknown>,
+  model: string,
+): Response {
+  const choices =
+    (openAIResponseBody.choices as Array<Record<string, unknown>> | undefined) ?? []
+  const firstChoice = choices[0] ?? {}
+  const message = (firstChoice.message as Record<string, unknown> | undefined) ?? {}
+  const toolCalls =
+    (message.tool_calls as Array<Record<string, unknown>> | undefined) ?? []
+  const usage = (openAIResponseBody.usage as Record<string, unknown> | undefined) ?? {}
+
+  const content: AnthropicContentBlock[] = []
+
+  if (typeof message.content === 'string' && message.content.length > 0) {
+    content.push({ type: 'text', text: message.content })
+  }
+
+  for (const toolCall of toolCalls) {
+    const fn = (toolCall.function as Record<string, unknown> | undefined) ?? {}
+    let parsedInput: Record<string, unknown> = {}
+    if (typeof fn.arguments === 'string' && fn.arguments.length > 0) {
+      try {
+        parsedInput = JSON.parse(fn.arguments) as Record<string, unknown>
+      } catch {
+        parsedInput = { raw: fn.arguments }
+      }
+    }
+
+    content.push({
+      type: 'tool_use',
+      id: String(toolCall.id ?? nextToolCallId()),
+      name: String(fn.name ?? ''),
+      input: parsedInput,
+    })
+  }
+
+  const anthropicBody = {
+    id: `msg_compat_${nextToolCallId()}`,
+    type: 'message',
+    role: 'assistant',
+    content,
+    model,
+    stop_reason:
+      typeof firstChoice.finish_reason === 'string'
+        ? firstChoice.finish_reason === 'tool_calls'
+          ? 'tool_use'
+          : 'end_turn'
+        : null,
+    stop_sequence: null,
+    usage: {
+      input_tokens:
+        typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : 0,
+      output_tokens:
+        typeof usage.completion_tokens === 'number' ? usage.completion_tokens : 0,
+    },
+  }
+
+  return new Response(JSON.stringify(anthropicBody), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
 // ── Stream translation: OpenAI SSE → Anthropic SSE ──────────────────
@@ -577,9 +674,12 @@ export function createOpenAICompatFetch(
   apiKey: string,
 ): typeof fetch {
   // Normalize base URL
-  const normalizedBase = baseUrl.replace(/\/$/, '')
+  const normalizedBase = normalizeBaseUrl(baseUrl)
 
-  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const adapter = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
 
     // Only intercept Anthropic messages endpoint
@@ -605,6 +705,7 @@ export function createOpenAICompatFetch(
     const model = mapModelName(claudeModel)
     const anthropicMessages = (body.messages || []) as AnthropicMessage[]
     const anthropicTools = (body.tools || []) as AnthropicTool[]
+    const wantsStreaming = body.stream === true
 
     // Extract system prompt
     let systemPrompt: string | undefined
@@ -621,7 +722,7 @@ export function createOpenAICompatFetch(
     const openAIBody: Record<string, unknown> = {
       model,
       messages: openAIMessages,
-      stream: true,
+      stream: wantsStreaming,
       temperature: body.temperature ?? 0.7,
     }
 
@@ -639,7 +740,7 @@ export function createOpenAICompatFetch(
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${apiKey}`,
-        accept: 'text/event-stream',
+        accept: wantsStreaming ? 'text/event-stream' : 'application/json',
       },
       body: JSON.stringify(openAIBody),
     })
@@ -660,8 +761,34 @@ export function createOpenAICompatFetch(
       )
     }
 
-    return translateStreamToAnthropic(resp, model)
+    if (wantsStreaming) {
+      return translateStreamToAnthropic(resp, model)
+    }
+
+    let parsedBody: Record<string, unknown>
+    try {
+      parsedBody = (await resp.json()) as Record<string, unknown>
+    } catch {
+      return new Response(
+        JSON.stringify({
+          error: {
+            type: 'api_error',
+            message: 'OpenAI-compat API returned invalid JSON for non-streaming request.',
+          },
+        }),
+        {
+          status: 502,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+    }
+
+    return translateNonStreamingToAnthropic(parsedBody, model)
   }
+
+  return Object.assign(adapter, {
+    preconnect: globalThis.fetch.preconnect?.bind(globalThis.fetch),
+  }) as typeof fetch
 }
 
 /**
@@ -675,13 +802,14 @@ export function getOpenAICompatFetch(): typeof fetch | null {
 
   if (!enabled) return null
 
-  const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
+  const preset = getOpenAICompatProviderPreset()
+  const baseUrl = process.env.OPENAI_COMPAT_BASE_URL ?? preset?.baseUrl
   const apiKey = process.env.OPENAI_COMPAT_API_KEY
 
   if (!baseUrl || !apiKey) {
     console.warn(
       '[OpenAI-Compat] CLAUDE_CODE_USE_OPENAI_COMPAT=1 is set but ' +
-        'OPENAI_COMPAT_BASE_URL or OPENAI_COMPAT_API_KEY is missing.',
+        'OPENAI_COMPAT_BASE_URL (or OPENAI_COMPAT_PROVIDER) or OPENAI_COMPAT_API_KEY is missing.',
     )
     return null
   }

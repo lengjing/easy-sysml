@@ -18,6 +18,14 @@ import {
   createOpenAICompatFetch,
 } from '../openai-compat-fetch-adapter.ts';
 
+function asFetch(
+  fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): typeof fetch {
+  return Object.assign(fn, {
+    preconnect: globalThis.fetch.preconnect?.bind(globalThis.fetch),
+  }) as typeof fetch;
+}
+
 /* ------------------------------------------------------------------ */
 /*  OPENAI_COMPAT_PROVIDERS                                           */
 /* ------------------------------------------------------------------ */
@@ -47,6 +55,7 @@ describe('getOpenAICompatFetch()', () => {
     delete process.env.CLAUDE_CODE_USE_OPENAI_COMPAT;
     delete process.env.OPENAI_COMPAT_BASE_URL;
     delete process.env.OPENAI_COMPAT_API_KEY;
+    delete process.env.OPENAI_COMPAT_PROVIDER;
   });
 
   it('returns null when CLAUDE_CODE_USE_OPENAI_COMPAT is not set', () => {
@@ -82,6 +91,14 @@ describe('getOpenAICompatFetch()', () => {
     const fn = getOpenAICompatFetch();
     expect(typeof fn).toBe('function');
   });
+
+  it('returns a fetch function when preset provider is configured', () => {
+    process.env.CLAUDE_CODE_USE_OPENAI_COMPAT = '1';
+    process.env.OPENAI_COMPAT_PROVIDER = 'deepseek';
+    process.env.OPENAI_COMPAT_API_KEY = 'sk-test';
+    const fn = getOpenAICompatFetch();
+    expect(typeof fn).toBe('function');
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -92,10 +109,10 @@ describe('createOpenAICompatFetch() — URL routing', () => {
   it('passes through requests that do not include /messages', async () => {
     const mockFetch = globalThis.fetch;
     let capturedUrl: string | undefined;
-    globalThis.fetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
+    globalThis.fetch = asFetch(async (input: RequestInfo | URL, _init?: RequestInit) => {
       capturedUrl = input instanceof Request ? input.url : String(input);
       return new Response('{}', { status: 200 });
-    };
+    });
 
     try {
       const adapter = createOpenAICompatFetch('https://api.example.com', 'sk-test');
@@ -111,7 +128,7 @@ describe('createOpenAICompatFetch() — URL routing', () => {
     let capturedBody: Record<string, unknown> | undefined;
 
     const mockFetch = globalThis.fetch;
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = asFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       capturedUrl = input instanceof Request ? input.url : String(input);
       capturedBody = JSON.parse(init?.body as string ?? '{}');
       const stream = new ReadableStream({
@@ -125,7 +142,7 @@ describe('createOpenAICompatFetch() — URL routing', () => {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
       });
-    };
+    });
 
     try {
       const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
@@ -147,6 +164,62 @@ describe('createOpenAICompatFetch() — URL routing', () => {
       globalThis.fetch = mockFetch;
     }
   });
+
+  it('preserves non-streaming requests for SDK create() callers', async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = asFetch(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedBody = JSON.parse(init?.body as string ?? '{}');
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl_123',
+          choices: [
+            {
+              index: 0,
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: 'Hello from compat',
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 12,
+            completion_tokens: 4,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    });
+
+    try {
+      const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
+      const response = await adapter('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'claude-sonnet',
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      });
+
+      expect(capturedBody?.stream).toBe(false);
+      expect(response.headers.get('content-type')).toContain('application/json');
+
+      const responseBody = await response.json() as Record<string, unknown>;
+      expect(responseBody.type).toBe('message');
+      expect(responseBody.model).toBe('deepseek-chat');
+      expect(responseBody.stop_reason).toBe('end_turn');
+      expect((responseBody.content as Array<Record<string, unknown>>)[0]?.text).toBe('Hello from compat');
+      expect((responseBody.usage as Record<string, unknown>).input_tokens).toBe(12);
+      expect((responseBody.usage as Record<string, unknown>).output_tokens).toBe(4);
+    } finally {
+      globalThis.fetch = mockFetch;
+    }
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -160,7 +233,7 @@ describe('Message translation via createOpenAICompatFetch', () => {
   beforeEach(() => {
     capturedBody = undefined;
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = asFetch(async (_input: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(init?.body as string ?? '{}');
       const stream = new ReadableStream({
         start(controller) {
@@ -173,7 +246,7 @@ describe('Message translation via createOpenAICompatFetch', () => {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
       });
-    };
+    });
   });
 
   afterEach(() => {
@@ -329,11 +402,11 @@ describe('Model name mapping', () => {
     let capturedBody: Record<string, unknown> | undefined;
 
     const mockFetch = globalThis.fetch;
-    globalThis.fetch = async (_: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = asFetch(async (_: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(init?.body as string ?? '{}');
       const stream = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: [DONE]\n\n')); c.close(); } });
       return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
-    };
+    });
 
     try {
       const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
@@ -352,11 +425,11 @@ describe('Model name mapping', () => {
     let capturedBody: Record<string, unknown> | undefined;
 
     const mockFetch = globalThis.fetch;
-    globalThis.fetch = async (_: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = asFetch(async (_: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(init?.body as string ?? '{}');
       const stream = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: [DONE]\n\n')); c.close(); } });
       return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
-    };
+    });
 
     try {
       const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
@@ -369,6 +442,51 @@ describe('Model name mapping', () => {
       globalThis.fetch = mockFetch;
     }
   });
+
+  it('uses preset default model when OPENAI_COMPAT_PROVIDER is set', async () => {
+    process.env.OPENAI_COMPAT_PROVIDER = 'qwen';
+
+    let capturedBody: Record<string, unknown> | undefined;
+    const mockFetch = globalThis.fetch;
+    globalThis.fetch = asFetch(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl-1',
+          object: 'chat.completion',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'hi' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    });
+
+    try {
+      const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
+      await adapter('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 32,
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      });
+
+      expect(capturedBody?.model).toBe('qwen-plus');
+    } finally {
+      delete process.env.OPENAI_COMPAT_PROVIDER;
+      globalThis.fetch = mockFetch;
+    }
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -378,12 +496,12 @@ describe('Model name mapping', () => {
 describe('Error handling', () => {
   it('returns error response when upstream returns 4xx', async () => {
     const mockFetch = globalThis.fetch;
-    globalThis.fetch = async () => {
+    globalThis.fetch = asFetch(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       return new Response('{"error": "Unauthorized"}', {
         status: 401,
         headers: { 'content-type': 'application/json' },
       });
-    };
+    });
 
     try {
       const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-bad-key');

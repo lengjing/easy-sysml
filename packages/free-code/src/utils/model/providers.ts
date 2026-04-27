@@ -12,8 +12,7 @@ export function getAPIProvider(): APIProvider {
         ? 'foundry'
         : isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI)
           ? 'openai'
-          : (process.env.CLAUDE_CODE_USE_OPENAI_COMPAT === '1' ||
-              process.env.CLAUDE_CODE_USE_OPENAI_COMPAT === 'true')
+          : isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI_COMPAT)
             ? 'openai-compat'
             : 'firstParty'
 }
