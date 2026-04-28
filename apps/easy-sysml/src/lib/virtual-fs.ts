@@ -90,57 +90,7 @@ export function generateId(): string {
 }
 
 export function createDefaultWorkspace(): FileNode[] {
-  const now = Date.now();
-  const rootId = generateId();
-  const mainId = generateId();
-  const subsystemId = generateId();
-
-  return [
-    {
-      id: rootId,
-      name: 'UAV_System',
-      type: 'directory',
-      parentId: null,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: mainId,
-      name: 'main.sysml',
-      type: 'file',
-      parentId: rootId,
-      content: `package UAV_System {
-    part def Control_Subsystem {
-        doc /* Executes complex flight control algorithms. */
-        attribute frequency : String;
-    }
-    part def Power_Subsystem {
-        doc /* Provides regulated power to all avionics. */
-        attribute voltage : String;
-    }
-}`,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: subsystemId,
-      name: 'subsystems.sysml',
-      type: 'file',
-      parentId: rootId,
-      content: `package Subsystems {
-    part def Navigation_Subsystem {
-        doc /* GPS and INS based navigation module. */
-        attribute accuracy : String;
-    }
-    part def Communication_Subsystem {
-        doc /* Data link for telemetry and commands. */
-        attribute bandwidth : String;
-    }
-}`,
-      createdAt: now,
-      updatedAt: now,
-    },
-  ];
+  return [];
 }
 
 /* ------------------------------------------------------------------ */
