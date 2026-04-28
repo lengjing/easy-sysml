@@ -1,6 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SessionManager, type CreateSessionOptions, type SessionBackend } from '../sessionManager.js'
 import { startServer } from '../server.js'
@@ -14,6 +17,39 @@ class TestBackend implements SessionBackend {
       "console.log(JSON.stringify({ type: 'system', subtype: 'ready' }));",
       "const rl = readline.createInterface({ input: process.stdin });",
       "rl.on('line', line => console.log(line));",
+      'setInterval(() => {}, 1000);',
+    ].join(' ')
+
+    return spawn(process.execPath, ['-e', script], {
+      cwd: options.workDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  }
+}
+
+class StreamingBackend implements SessionBackend {
+  createSession(options: CreateSessionOptions): ChildProcess {
+    const script = [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const readline = require('node:readline');",
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "console.log(JSON.stringify({ type: 'system', subtype: 'ready' }));",
+      'rl.on(\'line\', line => {',
+      '  const payload = JSON.parse(line);',
+      '  if (payload.type !== \"user\") return;',
+      '  const filePath = path.join(process.cwd(), \"generated.sysml\");',
+      '  const fileContent = \"package GeneratedModel {}\";',
+      '  fs.writeFileSync(filePath, fileContent, \"utf8\");',
+      '  console.log(JSON.stringify({ type: \"assistant_partial\", delta: \"Generating SysML\" }));',
+      '  console.log(JSON.stringify({ type: \"assistant\", message: { content: [',
+      '    { type: \"text\", text: \"Generated model saved.\" },',
+      '    { type: \"thinking\", thinking: \"Using Write to persist the model\" },',
+      '    { type: \"tool_use\", id: \"write-1\", name: \"Write\", input: { file_path: \"generated.sysml\", content: fileContent } }',
+      '  ] } }));',
+      '  console.log(JSON.stringify({ type: \"tool_result\", tool_use_id: \"write-1\", is_error: false, content: [{ text: \"saved generated.sysml\" }] }));',
+      '  console.log(JSON.stringify({ type: \"result\", is_error: false, result: \"ok\" }));',
+      '});',
       'setInterval(() => {}, 1000);',
     ].join(' ')
 
@@ -42,6 +78,25 @@ function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
 async function startTestServer(overrides: Partial<ServerConfig> = {}) {
   const config = makeConfig(overrides)
   const sessions = new SessionManager(new TestBackend(), {
+    idleTimeoutMs: config.idleTimeoutMs,
+    maxSessions: config.maxSessions,
+  })
+  const server = await startServer(config, sessions, logger)
+  const port = server.port ?? config.port
+  const base = `http://${config.host}:${port}`
+
+  return {
+    base,
+    config,
+    port,
+    server,
+    sessions,
+  }
+}
+
+async function startStreamingTestServer(overrides: Partial<ServerConfig> = {}) {
+  const config = makeConfig(overrides)
+  const sessions = new SessionManager(new StreamingBackend(), {
     idleTimeoutMs: config.idleTimeoutMs,
     maxSessions: config.maxSessions,
   })
@@ -106,6 +161,27 @@ function doWsHandshake(
       socket.destroy()
       resolve(-2)
     }, 2_000)
+  })
+}
+
+async function collectWsMessages(url: string, outboundMessage: Record<string, unknown>): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url)
+    const messages: string[] = []
+
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify(outboundMessage))
+    })
+
+    ws.addEventListener('message', event => {
+      messages.push(String(event.data))
+      if (messages.some(message => message.includes('"type":"result"'))) {
+        ws.close()
+      }
+    })
+
+    ws.addEventListener('close', () => resolve(messages))
+    ws.addEventListener('error', () => reject(new Error('websocket connect failed')))
   })
 }
 
@@ -293,6 +369,36 @@ describe('server command runtime modules', () => {
         `/sessions/${session_id}?token=secret`,
       )
       expect(allowed).toBe(101)
+    } finally {
+      await testServer.sessions.destroyAll()
+      testServer.server.stop(true)
+    }
+  })
+
+  it('streams assistant, tool, and result messages for SysML generation', async () => {
+    const workDir = await mkdtemp(join(tmpdir(), 'free-code-server-test-'))
+    const testServer = await startStreamingTestServer()
+    try {
+      const create = await makeReq(testServer.base, '/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cwd: workDir, prompt: 'generate sysml' }),
+      })
+      expect(create.status).toBe(201)
+      const { ws_url } = (await create.json()) as { ws_url: string }
+
+      const messages = await collectWsMessages(ws_url, {
+        type: 'user',
+        message: 'Create a SysML model',
+      })
+
+      expect(messages.some(message => message.includes('"type":"assistant_partial"'))).toBe(true)
+      expect(messages.some(message => message.includes('"type":"assistant"'))).toBe(true)
+      expect(messages.some(message => message.includes('"type":"tool_result"'))).toBe(true)
+      expect(messages.some(message => message.includes('"type":"result"'))).toBe(true)
+
+      const generatedFile = await readFile(join(workDir, 'generated.sysml'), 'utf8')
+      expect(generatedFile).toContain('package GeneratedModel {}')
     } finally {
       await testServer.sessions.destroyAll()
       testServer.server.stop(true)

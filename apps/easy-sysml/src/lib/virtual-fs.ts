@@ -12,6 +12,12 @@
 export interface FileNode {
   /** Unique stable identifier. */
   id: string;
+  /** Remote file id from sysml-server when available. */
+  remoteId?: string;
+  /** Persisted project path on sysml-server. */
+  remotePath?: string;
+  /** Whether the file is waiting for the first backend roundtrip. */
+  isPending?: boolean;
   /** Display name (e.g. "model.sysml"). */
   name: string;
   /** 'file' or 'directory'. */
@@ -171,6 +177,16 @@ export class VirtualFileSystem {
     return this.nodes.get(id);
   }
 
+  /** Replace the full tree contents. */
+  replaceAll(nodes: FileNode[]): void {
+    this.nodes.clear();
+    for (const node of nodes) {
+      this.nodes.set(node.id, node);
+    }
+    this.scheduleSave();
+    this.notify();
+  }
+
   /** Get children of a given parent (null = root level). */
   getChildren(parentId: string | null): FileNode[] {
     const result: FileNode[] = [];
@@ -260,6 +276,16 @@ export class VirtualFileSystem {
     if (!node || node.type !== 'file') return;
     node.content = content;
     node.updatedAt = Date.now();
+    this.scheduleSave();
+    this.notify();
+  }
+
+  /** Patch an existing node with updated metadata. */
+  patchNode(id: string, patch: Partial<FileNode>): void {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    Object.assign(node, patch);
+    node.updatedAt = patch.updatedAt ?? Date.now();
     this.scheduleSave();
     this.notify();
   }

@@ -2,7 +2,6 @@ import React from 'react';
 import { 
   Box, 
   Database, 
-  ChevronDown, 
   Layers, 
   Network, 
   Play, 
@@ -11,25 +10,34 @@ import {
   Moon, 
   Bell, 
   HelpCircle, 
-  Settings 
+  Settings,
+  Plus,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Project } from '../types';
 
 interface HeaderProps {
   project: Project;
+  projects?: Array<{ id: string; name: string }>;
   activeTab: string;
   setActiveTab: (tab: any) => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+  onSelectProject?: (projectId: string) => void;
+  onCreateProject?: () => void;
+  projectBusy?: boolean;
 }
 
 export const Header = ({ 
   project, 
+  projects = [],
   activeTab, 
   setActiveTab, 
   theme, 
-  toggleTheme 
+  toggleTheme,
+  onSelectProject,
+  onCreateProject,
+  projectBusy = false,
 }: HeaderProps) => {
   return (
     <header className="h-12 border-b border-[var(--border-color)] flex items-center justify-between px-4 bg-[var(--bg-header)] z-50 transition-colors duration-200">
@@ -44,10 +52,31 @@ export const Header = ({
           </div>
         </div>
         <div className="h-6 w-px bg-[var(--border-color)] mx-2" />
-        <div className="flex items-center gap-2 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded px-2 py-1 cursor-pointer hover:bg-[var(--border-color)] transition-colors">
+        <div className="flex items-center gap-2 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded px-2 py-1 transition-colors">
           <Database size={14} className="text-blue-400" />
-          <span className="text-xs font-medium text-[var(--text-main)]">{project.name}</span>
-          <ChevronDown size={12} className="text-[var(--text-muted)]" />
+          <select
+            aria-label="当前项目"
+            value={project.id}
+            onChange={(event) => onSelectProject?.(event.target.value)}
+            disabled={projectBusy || projects.length === 0}
+            className="bg-transparent text-xs font-medium text-[var(--text-main)] outline-none min-w-[140px] disabled:opacity-60"
+          >
+            {[project, ...projects.filter(item => item.id !== project.id)].map(item => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={onCreateProject}
+            disabled={projectBusy}
+            className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            title="新建项目"
+          >
+            <Plus size={12} />
+            新建项目
+          </button>
         </div>
       </div>
 

@@ -128,14 +128,18 @@ filesRouter.get('/:fileId', (req: Request, res: Response) => {
 filesRouter.put('/:fileId', (req: Request, res: Response) => {
   const db = getDb();
   const existing = db
-    .prepare('SELECT id FROM sysml_files WHERE id = ? AND project_id = ?')
-    .get(req.params.fileId, req.params.projectId);
+    .prepare('SELECT id, path FROM sysml_files WHERE id = ? AND project_id = ?')
+    .get(req.params.fileId, req.params.projectId) as { id: string; path: string } | undefined;
   if (!existing) {
     res.status(404).json({ error: 'File not found' });
     return;
   }
 
-  const { name, content } = req.body as { name?: string; content?: string };
+  const { name, path: filePath, content } = req.body as {
+    name?: string;
+    path?: string;
+    content?: string;
+  };
   const now = Date.now();
 
   const sets: string[] = ['updated_at = ?'];
@@ -152,6 +156,26 @@ filesRouter.put('/:fileId', (req: Request, res: Response) => {
   if (content !== undefined) {
     sets.push('content = ?');
     params.push(content);
+  }
+  if (filePath !== undefined) {
+    const resolvedPath = sanitizeFilePath(filePath.trim());
+    if (!resolvedPath) {
+      res.status(400).json({ error: 'Invalid file path' });
+      return;
+    }
+
+    const duplicate = db
+      .prepare('SELECT id FROM sysml_files WHERE project_id = ? AND path = ? AND id != ?')
+      .get(req.params.projectId, resolvedPath, req.params.fileId);
+    if (duplicate) {
+      res.status(409).json({ error: 'A file with this path already exists in the project' });
+      return;
+    }
+
+    if (resolvedPath !== existing.path) {
+      sets.push('path = ?');
+      params.push(resolvedPath);
+    }
   }
 
   params.push(req.params.fileId, req.params.projectId);

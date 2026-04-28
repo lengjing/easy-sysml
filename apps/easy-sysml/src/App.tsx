@@ -18,15 +18,40 @@ import { TraceabilityMatrix } from './components/TraceabilityMatrix';
 import { AIChatPanel } from './components/ai/AIChatPanel';
 import { useSysMLParser } from './hooks/useSysMLParser';
 import { useFileSystem } from './hooks/useFileSystem';
+import {
+  createProject as createServerProject,
+  listProjects,
+  type ServerProjectRecord,
+} from './lib/sysml-server';
+
+function toWorkbenchProject(projectRecord: Pick<ServerProjectRecord, 'id' | 'name'>): Project {
+  return {
+    ...initialProject,
+    id: projectRecord.id,
+    name: projectRecord.name,
+    elements: [],
+    relationships: [],
+    diagrams: initialProject.diagrams.map(diagram => ({
+      ...diagram,
+      nodes: [],
+      edges: [],
+    })),
+  };
+}
 
 function WorkbenchContent() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [project] = useState<Project>(initialProject);
+  const [project, setProject] = useState<Project>(initialProject);
+  const [projectRecords, setProjectRecords] = useState<ServerProjectRecord[]>([]);
+  const [projectBusy, setProjectBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<'modeling' | 'traceability' | 'simulation' | 'reports' | 'search' | 'database'>('modeling');
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const [showCode, setShowCode] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const currentProjectId = projectRecords.some(item => item.id === project.id)
+    ? project.id
+    : undefined;
 
   // Structural element list for sidebar (no positions — only updated on add/remove)
   const [elements, setElements] = useState<SimpleElement[]>(() =>
@@ -59,7 +84,7 @@ function WorkbenchContent() {
     getPath,
     getUri,
     fs,
-  } = useFileSystem();
+  } = useFileSystem(currentProjectId);
 
   // Derive the editor code from the active file
   const kermlCode = activeFileContent;
@@ -77,7 +102,61 @@ function WorkbenchContent() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadProjects = async () => {
+      setProjectBusy(true);
+      try {
+        const records = await listProjects();
+        if (!active) return;
+        setProjectRecords(records);
+        if (records.length > 0) {
+          setProject(toWorkbenchProject(records[0]));
+        }
+      } catch (error) {
+        console.error('[easy-sysml] Failed to load projects:', error);
+      } finally {
+        if (active) {
+          setProjectBusy(false);
+        }
+      }
+    };
+
+    void loadProjects();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const toggleTheme = useCallback(() => setTheme(prev => (prev === 'dark' ? 'light' : 'dark')), []);
+
+  const handleSelectProject = useCallback((projectId: string) => {
+    const selected = projectRecords.find(item => item.id === projectId);
+    if (!selected) return;
+    setProject(toWorkbenchProject(selected));
+  }, [projectRecords]);
+
+  const handleCreateProject = useCallback(async () => {
+    const name = window.prompt('请输入项目名称', `新建项目 ${projectRecords.length + 1}`)?.trim();
+    if (!name) {
+      return;
+    }
+
+    setProjectBusy(true);
+    try {
+      const created = await createServerProject({ name });
+      setProjectRecords(prev => [created, ...prev.filter(item => item.id !== created.id)]);
+      setProject(toWorkbenchProject(created));
+      setShowCode(false);
+      setShowAI(false);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '创建项目失败');
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [projectRecords.length]);
 
   // Ref to the canvas — used to push addNode / dropNode / setExternalNodes
   const canvasRef = useRef<DiagramCanvasHandle>(null);
@@ -122,10 +201,14 @@ function WorkbenchContent() {
     <div className="flex flex-col h-screen w-screen bg-[var(--bg-main)] text-[var(--text-main)] font-sans overflow-hidden transition-colors duration-200">
       <Header
         project={project}
+        projects={projectRecords}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         theme={theme}
         toggleTheme={toggleTheme}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+        projectBusy={projectBusy}
       />
 
       <main className="flex flex-1 overflow-hidden relative">

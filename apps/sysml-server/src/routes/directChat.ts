@@ -233,7 +233,17 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
   req.on('close', finish);
 
   ws.on('open', () => {
-    ws.send(JSON.stringify({ type: 'user', message: lastUserMsg.content }));
+    ws.send(
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: lastUserMsg.content,
+        },
+        parent_tool_use_id: null,
+        session_id: convState.freeCodeSessionId,
+      }),
+    );
   });
 
   ws.on('message', (rawData: Buffer | string) => {
@@ -276,7 +286,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 /*  Map free-code messages → SSE events                               */
 /* ------------------------------------------------------------------ */
 
-function handleFreeCodeMsg(
+export function handleFreeCodeMsg(
   res: Response,
   msg: Record<string, unknown>,
   pendingToolUses: Map<string, { name: string; input: Record<string, unknown> }>,
@@ -296,11 +306,19 @@ function handleFreeCodeMsg(
       const contentBlocks = (
         msg.message as { content?: unknown[] } | undefined
       )?.content;
+      if (typeof contentBlocks === 'string') {
+        if (contentBlocks) {
+          sseWrite(res, 'delta', { content: contentBlocks });
+        }
+        break;
+      }
       if (!Array.isArray(contentBlocks)) break;
 
       for (const block of contentBlocks) {
         const b = block as Record<string, unknown>;
-        if (b.type === 'thinking' && typeof b.thinking === 'string') {
+        if (b.type === 'text' && typeof b.text === 'string') {
+          sseWrite(res, 'delta', { content: b.text });
+        } else if (b.type === 'thinking' && typeof b.thinking === 'string') {
           sseWrite(res, 'thinking', { content: b.thinking });
         } else if (b.type === 'tool_use') {
           const id = String(b.id ?? '');
@@ -309,7 +327,6 @@ function handleFreeCodeMsg(
           pendingToolUses.set(id, { name, input });
           sseWrite(res, 'tool_call', { id, name, input, status: 'running' });
         }
-        // text blocks stream via assistant_partial
       }
       break;
     }
@@ -367,6 +384,24 @@ function handleFreeCodeMsg(
         content:
           typeof msg.message === 'string' ? msg.message : 'Agent error',
       });
+      break;
+    }
+
+    case 'server_error': {
+      sseWrite(res, 'error', {
+        content:
+          typeof msg.content === 'string' ? msg.content : 'Session server error',
+      });
+      break;
+    }
+
+    case 'server_session_done': {
+      const exitCode = Number(msg.exit_code ?? 0);
+      if (exitCode !== 0) {
+        sseWrite(res, 'error', {
+          content: `free-code session exited with code ${exitCode}`,
+        });
+      }
       break;
     }
 
