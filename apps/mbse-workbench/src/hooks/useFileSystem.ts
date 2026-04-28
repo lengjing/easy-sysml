@@ -56,7 +56,7 @@ export interface UseFileSystemReturn {
 /*  Hook                                                              */
 /* ------------------------------------------------------------------ */
 
-export function useFileSystem(): UseFileSystemReturn {
+export function useFileSystem(projectId?: string | null): UseFileSystemReturn {
   const fsRef = useRef(getFileSystem());
   const fs = fsRef.current;
 
@@ -65,10 +65,13 @@ export function useFileSystem(): UseFileSystemReturn {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
 
-  /* -- Initial load -- */
+  /* -- Initial load / project switch -- */
   useEffect(() => {
     let mounted = true;
-    fs.load().then(() => {
+    setReady(false);
+    setOpenTabs([]);
+    setActiveFileId(null);
+    fs.load(projectId ?? undefined).then(() => {
       if (!mounted) return;
       setNodes(fs.getAllNodes());
       // Auto-open the first file
@@ -81,7 +84,7 @@ export function useFileSystem(): UseFileSystemReturn {
       setReady(true);
     });
     return () => { mounted = false; };
-  }, [fs]);
+  }, [fs, projectId]);
 
   /* -- Subscribe to VFS changes -- */
   useEffect(() => {

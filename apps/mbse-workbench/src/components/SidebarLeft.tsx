@@ -6,7 +6,9 @@ import {
   Circle, Link2, Database, ShieldCheck,
   Component, ArrowRightCircle, ShieldAlert, Target,
   Cpu, Eye, Inbox, CheckSquare,
+  Files, GitBranch,
 } from 'lucide-react';
+import { cn } from '../lib/utils';
 import { TreeItem } from './TreeItem';
 import { ContextMenu } from './ContextMenu';
 import { FileExplorer } from './FileExplorer';
@@ -210,9 +212,22 @@ export const SidebarLeft = ({
   const renderContent = () => {
     if (activeTab === 'search') {
       return (
-        <div className="p-4 flex flex-col gap-4">
-          <div className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest">搜索结果</div>
-          <div className="text-xs text-[var(--text-muted)] italic">输入关键字开始搜索模型元素...</div>
+        <div className="flex flex-col h-full">
+          {/* Search input — only shown in the dedicated Search panel */}
+          <div className="p-3 border-b border-[var(--border-color)]">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" size={13} />
+              <input
+                type="text"
+                placeholder="搜索模型元素..."
+                autoFocus
+                className="w-full bg-[var(--bg-main)] border border-[var(--border-color)] rounded-md pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 transition-all text-[var(--text-main)]"
+              />
+            </div>
+          </div>
+          <div className="p-4 text-xs text-[var(--text-muted)] italic">
+            输入关键字开始搜索模型元素...
+          </div>
         </div>
       );
     }
@@ -329,33 +344,38 @@ export const SidebarLeft = ({
       exit={{ width: 0, opacity: 0 }}
       className="border-r border-[var(--border-color)] bg-[var(--bg-sidebar)] flex flex-col overflow-hidden transition-colors duration-200"
     >
-      <div className="p-3 border-b border-[var(--border-color)]">
-        <div className="relative mb-3">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" size={14} />
-          <input 
-            type="text" 
-            placeholder="搜索模型、图表..." 
-            className="w-full bg-[var(--bg-main)] border border-[var(--border-color)] rounded-md pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 transition-all text-[var(--text-main)]"
-          />
-        </div>
-        <div className="flex items-center justify-between">
+      {/* Sidebar header — title + view toggle (only for modeling tab) */}
+      {activeTab !== 'search' && (
+        <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)] flex-shrink-0">
           <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-            {activeTab === 'search' ? '搜索' : activeTab === 'database' ? '模型库' : sidebarView === 'files' ? '文件资源管理器' : '模型浏览器'}
+            {activeTab === 'database'
+              ? '模型库'
+              : sidebarView === 'files'
+              ? '文件树'
+              : '模型树'}
           </span>
-          <div className="flex gap-1">
-            {activeTab === 'modeling' && (
+          {activeTab === 'modeling' && (
+            <div className="flex items-center gap-0.5 bg-[var(--bg-main)] rounded border border-[var(--border-color)] p-0.5">
+              {/* Model tree toggle */}
               <button
-                className={`p-1 rounded text-[var(--text-muted)] transition-colors ${sidebarView === 'files' ? 'bg-blue-500/10 text-blue-500' : 'hover:bg-[var(--border-color)]'}`}
-                title={sidebarView === 'files' ? '切换到模型树' : '切换到文件管理'}
-                onClick={() => setSidebarView(sidebarView === 'files' ? 'model' : 'files')}
+                onClick={() => setSidebarView('model')}
+                className={cn('p-1 rounded transition-colors', sidebarView === 'model' ? 'bg-blue-500/15 text-blue-500' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]')}
+                title="模型树"
               >
-                <FileText size={14} />
+                <GitBranch size={13} />
               </button>
-            )}
-            <button className="p-1 hover:bg-[var(--border-color)] rounded text-[var(--text-muted)]" title="过滤"><Settings size={14} /></button>
-          </div>
+              {/* File tree toggle */}
+              <button
+                onClick={() => setSidebarView('files')}
+                className={cn('p-1 rounded transition-colors', sidebarView === 'files' ? 'bg-blue-500/15 text-blue-500' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]')}
+                title="文件树"
+              >
+                <Files size={13} />
+              </button>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* File Explorer view */}
       {sidebarView === 'files' && activeTab === 'modeling' && fsNodes && getFileChildren && onOpenFile && onCreateFile && onCreateDirectory && onRenameNode && onDeleteNode ? (

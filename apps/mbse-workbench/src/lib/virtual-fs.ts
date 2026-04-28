@@ -34,6 +34,14 @@ export interface WorkspaceData {
   nodes: FileNode[];
 }
 
+/** Project metadata (stored in the projects registry). */
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /* ------------------------------------------------------------------ */
 /*  IndexedDB helpers                                                 */
 /* ------------------------------------------------------------------ */
@@ -41,7 +49,17 @@ export interface WorkspaceData {
 const DB_NAME = 'easy-sysml-workspace';
 const DB_VERSION = 1;
 const STORE_NAME = 'workspace';
-const WORKSPACE_KEY = 'current';
+
+/** Key under which the active project id is stored. */
+const ACTIVE_PROJECT_KEY = '__active_project__';
+/** Key under which the project list is stored. */
+const PROJECTS_LIST_KEY = '__projects__';
+/** Workspace data key for a project: `workspace:{id}`. */
+function workspaceKey(projectId: string): string {
+  return `workspace:${projectId}`;
+}
+/** Legacy key kept for backwards compatibility. */
+const LEGACY_WORKSPACE_KEY = 'current';
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -79,6 +97,106 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
   });
 }
 
+async function idbDelete(key: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Project registry helpers                                          */
+/* ------------------------------------------------------------------ */
+
+/** Generate a unique project id using the Web Crypto API. */
+function generateProjectId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `p-${crypto.randomUUID()}`;
+  }
+  // Fallback for environments without crypto.randomUUID
+  return `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Load the list of all projects. */
+export async function loadProjectList(): Promise<ProjectMeta[]> {
+  try {
+    const list = await idbGet<ProjectMeta[]>(PROJECTS_LIST_KEY);
+    if (list && list.length > 0) return list;
+    // No projects yet — create the default one from the legacy workspace
+    const defaultProject = await _createDefaultProject();
+    return [defaultProject];
+  } catch {
+    return [];
+  }
+}
+
+/** Save the project list. */
+async function saveProjectList(list: ProjectMeta[]): Promise<void> {
+  await idbSet(PROJECTS_LIST_KEY, list);
+}
+
+/** Create a brand new project and persist it. Returns the new project. */
+export async function createNewProject(name: string, defaultContent?: FileNode[]): Promise<ProjectMeta> {
+  const now = Date.now();
+  const project: ProjectMeta = { id: generateProjectId(), name, createdAt: now, updatedAt: now };
+  const nodes = defaultContent ?? createDefaultWorkspace(name);
+  await idbSet(workspaceKey(project.id), { version: 1, nodes } as WorkspaceData);
+  const list = await loadProjectList();
+  await saveProjectList([...list, project]);
+  return project;
+}
+
+/** Delete a project and its workspace. Returns the updated project list. */
+export async function deleteProject(projectId: string): Promise<ProjectMeta[]> {
+  try { await idbDelete(workspaceKey(projectId)); } catch { /* best-effort */ }
+  const list = await loadProjectList();
+  const updated = list.filter(p => p.id !== projectId);
+  await saveProjectList(updated);
+  return updated;
+}
+
+/** Get the currently active project id. */
+export async function getActiveProjectId(): Promise<string | undefined> {
+  try { return await idbGet<string>(ACTIVE_PROJECT_KEY); } catch { return undefined; }
+}
+
+/** Persist the active project id. */
+export async function setActiveProjectId(id: string): Promise<void> {
+  await idbSet(ACTIVE_PROJECT_KEY, id);
+}
+
+/**
+ * Bootstrap: create the default project, migrating legacy 'current' workspace
+ * if it exists, otherwise generating fresh default content.
+ */
+async function _createDefaultProject(): Promise<ProjectMeta> {
+  const now = Date.now();
+  const project: ProjectMeta = {
+    id: generateProjectId(),
+    name: '无人机系统架构项目 (UAV System)',
+    createdAt: now,
+    updatedAt: now,
+  };
+  try {
+    const legacy = await idbGet<WorkspaceData>(LEGACY_WORKSPACE_KEY);
+    if (legacy && legacy.nodes.length > 0) {
+      await idbSet(workspaceKey(project.id), legacy);
+      await saveProjectList([project]);
+      await setActiveProjectId(project.id);
+      return project;
+    }
+  } catch { /* ignore */ }
+  const nodes = createDefaultWorkspace(project.name);
+  await idbSet(workspaceKey(project.id), { version: 1, nodes } as WorkspaceData);
+  await saveProjectList([project]);
+  await setActiveProjectId(project.id);
+  return project;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Default workspace                                                 */
 /* ------------------------------------------------------------------ */
@@ -89,16 +207,22 @@ export function generateId(): string {
   return `f-${Date.now()}-${++_idCounter}`;
 }
 
-export function createDefaultWorkspace(): FileNode[] {
+/** Maximum characters to use from a project name as a folder name. */
+const MAX_FOLDER_NAME_LENGTH = 30;
+
+export function createDefaultWorkspace(projectName?: string): FileNode[] {
   const now = Date.now();
   const rootId = generateId();
   const mainId = generateId();
   const subsystemId = generateId();
+  const folderName = projectName
+    ? projectName.replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '_').slice(0, MAX_FOLDER_NAME_LENGTH)
+    : 'UAV_System';
 
   return [
     {
       id: rootId,
-      name: 'UAV_System',
+      name: folderName,
       type: 'directory',
       parentId: null,
       createdAt: now,
@@ -151,11 +275,14 @@ export class VirtualFileSystem {
   private nodes: Map<string, FileNode> = new Map();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners: Set<() => void> = new Set();
+  private currentProjectId: string | null = null;
 
-  /** Load workspace from IndexedDB (or create defaults). */
-  async load(): Promise<void> {
+  /** Load workspace from IndexedDB for the given project (or create defaults). */
+  async load(projectId?: string): Promise<void> {
+    this.currentProjectId = projectId ?? null;
+    const key = projectId ? workspaceKey(projectId) : LEGACY_WORKSPACE_KEY;
     try {
-      const data = await idbGet<WorkspaceData>(WORKSPACE_KEY);
+      const data = await idbGet<WorkspaceData>(key);
       if (data && data.nodes.length > 0) {
         this.nodes.clear();
         for (const node of data.nodes) {
@@ -189,11 +316,14 @@ export class VirtualFileSystem {
   /** Immediately persist the current state. */
   async persistNow(): Promise<void> {
     try {
+      const key = this.currentProjectId
+        ? workspaceKey(this.currentProjectId)
+        : LEGACY_WORKSPACE_KEY;
       const data: WorkspaceData = {
         version: 1,
         nodes: Array.from(this.nodes.values()),
       };
-      await idbSet(WORKSPACE_KEY, data);
+      await idbSet(key, data);
     } catch {
       // Persist is best-effort
     }
@@ -381,4 +511,14 @@ export function getFileSystem(): VirtualFileSystem {
     _instance = new VirtualFileSystem();
   }
   return _instance;
+}
+
+/**
+ * Reset the singleton and load a new project workspace.
+ * All existing subscribers are notified after the reload.
+ */
+export async function switchProjectWorkspace(projectId: string): Promise<void> {
+  const fs = getFileSystem();
+  await fs.load(projectId);
+  await setActiveProjectId(projectId);
 }
