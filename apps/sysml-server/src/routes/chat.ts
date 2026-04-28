@@ -157,6 +157,8 @@ chatRouter.post('/', async (req: Request, res: Response) => {
 /*  Map free-code SDK messages to SSE events                          */
 /* ------------------------------------------------------------------ */
 
+const MAX_TOOL_RESULT_LENGTH = 500;
+
 function handleFreeCodeMessage(res: Response, msg: Record<string, unknown>): void {
   const type = msg.type as string;
 
@@ -202,8 +204,8 @@ function handleFreeCodeMessage(res: Response, msg: Record<string, unknown>): voi
             ? (msg.content as Array<{ text?: string }>)
                 .map(c => c.text ?? '')
                 .join('\n')
-                .slice(0, 500)
-            : String(msg.content ?? '').slice(0, 500),
+                .slice(0, MAX_TOOL_RESULT_LENGTH)
+            : String(msg.content ?? '').slice(0, MAX_TOOL_RESULT_LENGTH),
       });
       break;
     }

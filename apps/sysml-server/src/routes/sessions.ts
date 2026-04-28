@@ -9,7 +9,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { resolve, isAbsolute } from 'node:path';
+import { resolve, isAbsolute, relative } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db.js';
 
@@ -49,10 +49,12 @@ function resolveWorkDir(cwd: string | undefined): string {
   // Resolve to an absolute path
   const resolved = isAbsolute(cwd) ? resolve(cwd) : resolve(defaultDir, cwd);
 
-  // Reject paths containing traversal sequences after resolution if they
-  // escape the default workspace root.
+  // Reject paths that escape the workspace root.
+  // path.relative() returns a string starting with '..' when resolved escapes
+  // the workspace root, which is cross-platform safe.
   const workspaceRoot = resolve(defaultDir);
-  if (!resolved.startsWith(workspaceRoot + '/') && resolved !== workspaceRoot) {
+  const rel = relative(workspaceRoot, resolved);
+  if (rel.startsWith('..')) {
     console.warn(`[sysml-server] Rejected cwd outside workspace: ${resolved}`);
     return defaultDir;
   }
