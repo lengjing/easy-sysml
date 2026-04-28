@@ -162,9 +162,9 @@ function handleFreeCodeMessage(res: Response, msg: Record<string, unknown>): voi
 
   switch (type) {
     case 'assistant_partial': {
-      // Streaming text delta
-      const delta = msg.delta as string | undefined;
-      if (delta) {
+      // Streaming text delta — validate type before use
+      const delta = msg.delta;
+      if (typeof delta === 'string' && delta) {
         sseWrite(res, 'delta', { content: delta });
       }
       break;

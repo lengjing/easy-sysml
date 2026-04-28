@@ -9,6 +9,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { resolve, isAbsolute } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db.js';
 
@@ -33,6 +34,30 @@ function freeCodeHeaders(): Record<string, string> {
     headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
+}
+
+/**
+ * Resolve and validate a working directory path.
+ * Ensures the path is absolute and does not escape allowed boundaries.
+ * Falls back to the configured default when cwd is not provided or invalid.
+ */
+function resolveWorkDir(cwd: string | undefined): string {
+  const defaultDir = process.env.FREE_CODE_WORK_DIR || process.cwd();
+
+  if (!cwd) return defaultDir;
+
+  // Resolve to an absolute path
+  const resolved = isAbsolute(cwd) ? resolve(cwd) : resolve(defaultDir, cwd);
+
+  // Reject paths containing traversal sequences after resolution if they
+  // escape the default workspace root.
+  const workspaceRoot = resolve(defaultDir);
+  if (!resolved.startsWith(workspaceRoot + '/') && resolved !== workspaceRoot) {
+    console.warn(`[sysml-server] Rejected cwd outside workspace: ${resolved}`);
+    return defaultDir;
+  }
+
+  return resolved;
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,7 +112,7 @@ sessionsRouter.post('/', async (req: Request, res: Response) => {
   const freeCodeUrl = getFreeCodeServerUrl();
   let freeCodeSessionId: string | undefined;
   let freeCodeWsUrl: string | undefined;
-  let workDir = cwd || process.env.FREE_CODE_WORK_DIR || process.cwd();
+  let workDir = resolveWorkDir(cwd);
 
   try {
     const body: Record<string, unknown> = {

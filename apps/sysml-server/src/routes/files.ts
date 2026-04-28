@@ -6,10 +6,36 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { posix } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db.js';
 
 export const filesRouter = Router({ mergeParams: true });
+
+/* ------------------------------------------------------------------ */
+/*  Path sanitization                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Sanitize a file path to prevent directory traversal.
+ * Only allows relative paths without leading / or .. sequences.
+ * Returns null if the path is invalid.
+ */
+function sanitizeFilePath(rawPath: string): string | null {
+  // Normalize using POSIX rules (forward slashes only in stored paths)
+  const normalized = posix.normalize(rawPath.replace(/\\/g, '/'));
+
+  // Reject absolute paths or any traversal that escapes the virtual root
+  if (
+    normalized.startsWith('/') ||
+    normalized.startsWith('..') ||
+    normalized.includes('/..')
+  ) {
+    return null;
+  }
+
+  return normalized;
+}
 
 /* ------------------------------------------------------------------ */
 /*  GET /api/projects/:projectId/files                                 */
@@ -51,8 +77,13 @@ filesRouter.post('/', (req: Request, res: Response) => {
     return;
   }
 
-  // Default path to name if not provided
-  const resolvedPath = filePath?.trim() || name.trim();
+  // Default path to name if not provided, then sanitize
+  const rawPath = filePath?.trim() || name.trim();
+  const resolvedPath = sanitizeFilePath(rawPath);
+  if (!resolvedPath) {
+    res.status(400).json({ error: 'Invalid file path' });
+    return;
+  }
 
   // Check for duplicate path within project
   const duplicate = db
