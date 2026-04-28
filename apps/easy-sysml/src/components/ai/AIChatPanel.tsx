@@ -1,11 +1,12 @@
 /**
  * AI Chat Panel — Copilot-style Agent Interface
  *
- * Communicates with the separate AI agent server via SSE streaming.
+ * Communicates with sysml-server via SSE streaming, which proxies to free-code agent.
  * - Streams markdown content token-by-token (rendered via react-markdown)
- * - Code blocks are NOT displayed in chat — they are auto-synced to editor
- * - Shows thinking steps and tool calls inline
+ * - Auto-applies SysML code to editor when the agent writes a .sysml file
+ * - Shows thinking steps, tool calls and file operations inline (Copilot-style)
  * - Supports slash commands: /code, /help, /clear
+ * - Maintains conversation state (conversationId) for multi-turn sessions
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Markdown from 'react-markdown';
@@ -13,7 +14,8 @@ import {
   Sparkles, Send, Plus, Loader2,
   MessageSquare, AlertCircle, Brain, Terminal,
   FileCode, HelpCircle, Trash2, CheckCircle, Wrench,
-  XCircle,
+  XCircle, FileText, FilePen, Search, FolderOpen,
+  Globe, Square, Clock, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -27,7 +29,11 @@ interface ThinkingStep {
 }
 
 interface ToolCall {
+  /** free-code tool_use id — used for matching running → completed */
+  id?: string;
   name: string;
+  /** Parsed input args from the agent */
+  input?: Record<string, unknown>;
   status: 'running' | 'completed' | 'error';
   result?: string;
   timestamp: number;
@@ -40,8 +46,10 @@ interface ChatMessage {
   provider?: string;
   thinkingSteps: ThinkingStep[];
   toolCalls: ToolCall[];
-  /** Number of code blocks auto-synced to editor */
+  /** Number of SysML code blocks auto-synced to editor */
   codesSynced: number;
+  /** Duration from free-code result message */
+  durationMs?: number;
   timestamp: number;
 }
 
@@ -52,11 +60,11 @@ interface AIChatPanelProps {
 
 interface BackendStatus {
   ok: boolean;
-  provider: string;
-  providerLabel: string;
-  model: string;
-  configured: boolean;
-  tools?: string[];
+  server?: string;
+  version?: string;
+  configured?: boolean;
+  providerLabel?: string;
+  free_code_server_url?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -77,11 +85,63 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 const QUICK_PROMPTS = [
-  { label: '创建无人机系统', prompt: '帮我创建一个无人机系统模型，包含飞行控制、电力、通信子系统，每个子系统有属性和端口。' },
-  { label: '添加需求定义', prompt: '帮我创建一个需求定义，包含最大飞行高度、最大速度和续航时间的需求。' },
-  { label: '创建状态机', prompt: '帮我创建一个无人机飞行状态机，包含待机、起飞、巡航、降落、紧急着陆状态。' },
-  { label: '定义接口', prompt: '帮我定义通信接口和数据流，包含遥控信号输入端口和遥测数据输出端口。' },
+  { label: '创建系统模型', prompt: '帮我创建一个无人机系统模型，包含飞行控制、电力、通信子系统，每个子系统有属性和端口，保存为 drone_system.sysml。' },
+  { label: '添加需求定义', prompt: '帮我创建需求定义，包含最大飞行高度、最大速度和续航时间的需求，保存为 requirements.sysml。' },
+  { label: '创建状态机',   prompt: '帮我创建无人机飞行状态机，包含待机、起飞、巡航、降落、紧急着陆状态，保存为 flight_states.sysml。' },
+  { label: '定义接口',     prompt: '帮我定义通信接口和数据流，包含遥控信号输入端口和遥测数据输出端口，保存为 interfaces.sysml。' },
 ];
+
+/* ------------------------------------------------------------------ */
+/*  Tool icon + summary helpers                                       */
+/* ------------------------------------------------------------------ */
+
+function ToolIcon({ name, size = 9 }: { name: string; size?: number }) {
+  const n = name.toLowerCase();
+  if (n === 'bash')                         return <Terminal size={size} />;
+  if (n === 'write')                        return <FilePen size={size} />;
+  if (n === 'read')                         return <FileText size={size} />;
+  if (n === 'edit' || n === 'multiedit')    return <FilePen size={size} />;
+  if (n === 'glob' || n === 'listdir')      return <FolderOpen size={size} />;
+  if (n === 'grep')                         return <Search size={size} />;
+  if (n === 'webfetch')                     return <Globe size={size} />;
+  if (n === 'todoread' || n === 'todowrite') return <Square size={size} />;
+  return <Wrench size={size} />;
+}
+
+function getToolSummary(name: string, input?: Record<string, unknown>): string {
+  if (!input) return '';
+  const n = name.toLowerCase();
+  if (n === 'bash') {
+    const cmd = String(input.command ?? input.cmd ?? '').trim();
+    return cmd.length > 60 ? cmd.slice(0, 57) + '…' : cmd;
+  }
+  if (n === 'write' || n === 'read' || n === 'edit' || n === 'multiedit') {
+    return String(input.file_path ?? input.path ?? input.new_path ?? '');
+  }
+  if (n === 'glob') return String(input.pattern ?? '');
+  if (n === 'grep') return `"${String(input.pattern ?? '')}"`;
+  if (n === 'webfetch') {
+    const url = String(input.url ?? '');
+    return url.length > 50 ? url.slice(0, 47) + '…' : url;
+  }
+  return '';
+}
+
+function getToolLabel(name: string): string {
+  const n = name.toLowerCase();
+  if (n === 'bash')      return 'Bash';
+  if (n === 'write')     return 'Write';
+  if (n === 'read')      return 'Read';
+  if (n === 'edit')      return 'Edit';
+  if (n === 'multiedit') return 'MultiEdit';
+  if (n === 'listdir')   return 'ListDir';
+  if (n === 'glob')      return 'Glob';
+  if (n === 'grep')      return 'Grep';
+  if (n === 'webfetch')  return 'WebFetch';
+  if (n === 'todoread')  return 'TodoRead';
+  if (n === 'todowrite') return 'TodoWrite';
+  return name;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -107,15 +167,26 @@ const markdownComponents = {
     <em className="italic" {...props}>{children}</em>
   ),
   code: ({ children, className, ...props }: React.HTMLAttributes<HTMLElement>) => {
-    // Inline code only — block code is handled differently
-    if (className?.includes('language-')) return null;
+    if (className?.includes('language-')) {
+      return (
+        <code className="text-[12px] font-mono text-[var(--text-main)]" {...props}>
+          {children}
+        </code>
+      );
+    }
     return (
       <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-xs font-mono text-purple-600 dark:text-purple-400" {...props}>
         {children}
       </code>
     );
   },
-  pre: () => null, // Block code is stripped — auto-synced to editor
+  pre: ({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) => (
+    <div className="my-2 rounded-lg overflow-hidden border border-[var(--border-color)]">
+      <pre className="p-3 overflow-x-auto text-[12px] font-mono bg-slate-50 dark:bg-slate-900 text-[var(--text-main)]" {...props}>
+        {children}
+      </pre>
+    </div>
+  ),
   ul: ({ children, ...props }: React.HTMLAttributes<HTMLUListElement>) => (
     <ul className="list-disc pl-5 mb-2 space-y-1" {...props}>{children}</ul>
   ),
@@ -154,6 +225,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
 
+  // Conversation state — persists across messages for multi-turn sessions
+  const [conversationId, setConversationId] = useState<string | null>(null);
+
   // Streaming state
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingThinking, setStreamingThinking] = useState<ThinkingStep[]>([]);
@@ -170,16 +244,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       .then(r => r.json())
       .then((data: BackendStatus) => {
         setBackendStatus(data);
-        if (!data.configured) {
-          setBackendError('AI 后端 API Key 未配置，请在 ai-server 目录下配置 .env');
+        if (!data.ok) {
+          setBackendError('sysml-server 未就绪');
         }
       })
       .catch(() => {
-        setBackendError('无法连接 AI 后端服务。请先在 apps/ai-server 目录下运行: pnpm dev');
+        setBackendError('无法连接后端服务。请在 apps/sysml-server 目录下运行: pnpm dev');
       });
   }, []);
 
-  const aiAvailable = backendStatus?.configured ?? false;
+  const aiAvailable = backendStatus?.ok === true;
 
   // Auto-scroll
   useEffect(() => {
@@ -230,6 +304,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       }
       case '/clear':
         setMessages([]);
+        setConversationId(null);
         setInput('');
         break;
     }
@@ -270,6 +345,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const toolCallAcc: ToolCall[] = [];
     let contentAcc = '';
     let codeCount = 0;
+    let durationMs: number | undefined;
 
     try {
       const history = messages
@@ -283,6 +359,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         body: JSON.stringify({
           messages: history,
           currentCode: currentCode?.trim() || undefined,
+          conversationId: conversationId || undefined,
           autoApply: true,
         }),
         signal: controller.signal,
@@ -315,6 +392,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             try {
               const data = JSON.parse(line.slice(6));
               switch (currentEvent) {
+                case 'session': {
+                  // Store conversation ID for follow-up messages
+                  if (data.conversationId) {
+                    setConversationId(data.conversationId);
+                  }
+                  break;
+                }
                 case 'thinking': {
                   const step: ThinkingStep = { content: data.content, timestamp: Date.now() };
                   thinkingAcc.push(step);
@@ -336,17 +420,18 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 }
                 case 'tool_call': {
                   const tc: ToolCall = {
-                    name: data.name,
+                    id: data.id,
+                    name: data.name || 'unknown',
+                    input: data.input,
                     status: data.status,
                     result: data.result,
                     timestamp: Date.now(),
                   };
-                  // Update the most recent 'running' entry for this tool,
-                  // or append if this is a new invocation
+                  // Update existing running entry by ID, or append
                   let existingIdx = -1;
-                  if (data.status !== 'running') {
+                  if (data.id && data.status !== 'running') {
                     for (let i = toolCallAcc.length - 1; i >= 0; i--) {
-                      if (toolCallAcc[i].name === data.name && toolCallAcc[i].status === 'running') {
+                      if (toolCallAcc[i].id === data.id && toolCallAcc[i].status === 'running') {
                         existingIdx = i;
                         break;
                       }
@@ -358,6 +443,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     toolCallAcc.push(tc);
                   }
                   setStreamingToolCalls([...toolCallAcc]);
+                  break;
+                }
+                case 'result': {
+                  if (typeof data.duration_ms === 'number') {
+                    durationMs = data.duration_ms;
+                  }
                   break;
                 }
                 case 'error': {
@@ -373,9 +464,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   if (contentAcc.trim() || codeCount > 0) {
                     const assistantMsg: ChatMessage = {
                       id: makeId(), role: 'assistant', content: contentAcc,
-                      provider: backendStatus?.providerLabel,
+                      provider: backendStatus?.providerLabel || 'free-code',
                       thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
-                      codesSynced: codeCount, timestamp: Date.now(),
+                      codesSynced: codeCount, durationMs, timestamp: Date.now(),
                     };
                     setMessages(prev => [...prev, assistantMsg]);
                   }
@@ -405,7 +496,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setStreamingCodeCount(0);
       abortRef.current = null;
     }
-  }, [aiAvailable, backendStatus, currentCode, executeCommand, input, loading, messages, onApplyCode]);
+  }, [aiAvailable, backendStatus, conversationId, currentCode, executeCommand, input, loading, messages, onApplyCode]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -414,6 +505,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const handleNewChat = useCallback(() => {
     setMessages([]);
     setInput('');
+    setConversationId(null);
     setStreamingContent('');
     setStreamingThinking([]);
     setStreamingToolCalls([]);
@@ -435,16 +527,14 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           <span className="text-[12px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
             Copilot
           </span>
-          {backendStatus?.tools && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
-              Agent
-            </span>
-          )}
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+            Agent
+          </span>
         </div>
         <div className="flex items-center gap-1">
           {backendStatus && (
             <span className="px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] font-medium text-[var(--text-muted)]">
-              {backendStatus.providerLabel}
+              free-code
             </span>
           )}
           <button
@@ -477,7 +567,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               </div>
               <h3 className="text-sm font-bold text-[var(--text-main)] mb-1">SysML v2 Copilot</h3>
               <p className="text-[12px] text-[var(--text-muted)] max-w-[280px] mx-auto leading-relaxed">
-                AI Agent 驱动 · 语法自动验证 · 代码直接同步编辑器
+                free-code Agent · 实时工具调用 · 文件直接写入编辑器
               </p>
               <p className="text-[11px] text-[var(--text-muted)] mt-2">
                 输入 <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-purple-600 dark:text-purple-400 text-[10px] font-mono">/</code> 查看命令
@@ -504,32 +594,38 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
             {/* Streaming in-progress */}
             {loading && (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {/* Thinking steps */}
                 {streamingThinking.length > 0 && (
-                  <div className="ml-1 space-y-0.5 border-l-2 border-purple-500/30 pl-2">
-                    {streamingThinking.map((step, si) => (
-                      <div key={si} className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)]">
-                        <Brain size={8} className="text-purple-400 mt-0.5 flex-shrink-0" />
-                        <span>{step.content}</span>
-                      </div>
-                    ))}
+                  <div className="ml-1 border-l-2 border-purple-500/30 pl-2">
+                    <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-purple-500 uppercase">
+                      <Brain size={8} />
+                      <span>思考中…</span>
+                    </div>
+                    <div className="space-y-0.5 max-h-[80px] overflow-hidden">
+                      {streamingThinking.slice(-3).map((step, si) => (
+                        <div key={si} className="text-[11px] text-[var(--text-muted)] line-clamp-2">
+                          {step.content}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 {/* Tool calls */}
                 {streamingToolCalls.length > 0 && (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {streamingToolCalls.map((tc, ti) => (
-                      <div key={ti} className="flex items-center gap-1.5 px-2 py-1 rounded bg-[var(--bg-main)] border border-[var(--border-color)] text-[11px]">
-                        <Wrench size={9} className={cn(
-                          tc.status === 'running' ? 'text-blue-500 animate-spin' :
-                          tc.status === 'completed' ? 'text-emerald-500' : 'text-red-500',
-                        )} />
-                        <span className="font-mono font-medium text-[var(--text-main)]">{tc.name}</span>
-                        {tc.result && <span className="text-[var(--text-muted)] ml-auto truncate max-w-[220px]">{tc.result}</span>}
-                      </div>
+                      <StreamingToolCall key={ti} tc={tc} />
                     ))}
+                  </div>
+                )}
+
+                {/* Code synced badge */}
+                {streamingCodeCount > 0 && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle size={9} />
+                    <span>{streamingCodeCount} 个文件已同步到编辑器</span>
                   </div>
                 )}
 
@@ -539,13 +635,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     <div className="flex items-center gap-1.5 mb-1.5">
                       <Sparkles size={10} className="text-purple-500" />
                       <span className="text-[11px] font-bold text-purple-500 uppercase">
-                        {backendStatus?.providerLabel || 'AI'}
+                        free-code
                       </span>
-                      {streamingCodeCount > 0 && (
-                        <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium ml-auto">
-                          {streamingCodeCount} 代码块已同步
-                        </span>
-                      )}
                     </div>
                     <div className="text-[13px] text-[var(--text-main)] leading-relaxed prose-sm">
                       <Markdown components={mdComponents}>{streamingContent}</Markdown>
@@ -556,7 +647,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--bg-main)] border border-[var(--border-color)]">
                     <Loader2 size={14} className="text-purple-500 animate-spin" />
                     <span className="text-[13px] text-[var(--text-muted)]">
-                      {backendStatus?.providerLabel || 'AI'} 正在思考...
+                      Agent 工作中…
                     </span>
                   </div>
                 )}
@@ -586,12 +677,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         {!aiAvailable && !backendError && (
           <div className="mb-2 flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20">
             <AlertCircle size={11} className="text-amber-500 flex-shrink-0" />
-            <span className="text-[13px] text-amber-600 dark:text-amber-400">正在连接 AI 后端...</span>
+            <span className="text-[13px] text-amber-600 dark:text-amber-400">正在连接后端…</span>
           </div>
         )}
         <div className="flex items-end gap-1.5">
           <textarea ref={inputRef} value={input} onChange={handleInputChange} onKeyDown={handleKeyDown}
-            placeholder={aiAvailable ? '描述您想要的模型，输入 / 查看命令...' : '等待后端连接...'}
+            placeholder={aiAvailable ? '描述您想要的模型，输入 / 查看命令…' : '等待后端连接…'}
             disabled={loading} rows={1}
             className="flex-1 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 transition-all resize-none text-[var(--text-main)] placeholder:text-[var(--text-muted)] disabled:opacity-50 min-h-[36px] max-h-[120px]"
             style={{ height: 'auto' }}
@@ -610,6 +701,48 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 };
 
 /* ------------------------------------------------------------------ */
+/*  StreamingToolCall — inline tool row during streaming             */
+/* ------------------------------------------------------------------ */
+
+const StreamingToolCall: React.FC<{ tc: ToolCall }> = ({ tc }) => {
+  const summary = getToolSummary(tc.name, tc.input);
+  const label = getToolLabel(tc.name);
+
+  return (
+    <div className={cn(
+      'flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px]',
+      tc.status === 'running'
+        ? 'bg-blue-500/5 border-blue-500/20'
+        : tc.status === 'completed'
+        ? 'bg-emerald-500/5 border-emerald-500/20'
+        : 'bg-red-500/5 border-red-500/20',
+    )}>
+      <span className={cn(
+        tc.status === 'running' ? 'text-blue-500' :
+        tc.status === 'completed' ? 'text-emerald-500' : 'text-red-500',
+      )}>
+        {tc.status === 'running'
+          ? <Loader2 size={9} className="animate-spin" />
+          : tc.status === 'completed'
+          ? <CheckCircle size={9} />
+          : <XCircle size={9} />}
+      </span>
+      <span className={cn(
+        'text-[var(--text-muted)]',
+        tc.status === 'running' ? 'text-blue-600 dark:text-blue-400' :
+        tc.status === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500',
+      )}>
+        <ToolIcon name={tc.name} size={9} />
+      </span>
+      <span className="font-mono font-medium text-[var(--text-main)]">{label}</span>
+      {summary && (
+        <span className="text-[var(--text-muted)] truncate flex-1 max-w-[200px]">{summary}</span>
+      )}
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
 /*  MessageBubble — renders a single completed message                */
 /* ------------------------------------------------------------------ */
 
@@ -619,35 +752,16 @@ const MessageBubble: React.FC<{
 }> = React.memo(({ msg, mdComponents }) => {
   return (
     <div>
-      {/* Thinking (collapsed) */}
+      {/* Thinking (collapsed details) */}
       {msg.thinkingSteps.length > 0 && (
-        <details className="mb-1.5">
-          <summary className="flex items-center gap-1.5 cursor-pointer text-[11px] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors select-none">
-            <Brain size={9} className="text-purple-500" />
-            <span className="font-medium">思考过程 ({msg.thinkingSteps.length})</span>
-          </summary>
-          <div className="mt-1 ml-3 space-y-0.5 border-l-2 border-purple-500/20 pl-2">
-            {msg.thinkingSteps.map((step, si) => (
-              <div key={si} className="flex items-start gap-1 text-[12px] text-[var(--text-muted)]">
-                <Terminal size={7} className="text-purple-400 mt-0.5 flex-shrink-0" />
-                <span>{step.content}</span>
-              </div>
-            ))}
-          </div>
-        </details>
+        <ThinkingBlock steps={msg.thinkingSteps} />
       )}
 
       {/* Tool calls */}
       {msg.toolCalls.length > 0 && (
         <div className="mb-1.5 space-y-0.5">
           {msg.toolCalls.map((tc, ti) => (
-            <div key={ti} className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[var(--bg-main)] border border-[var(--border-color)] text-[12px]">
-              {tc.status === 'completed' ? <CheckCircle size={8} className="text-emerald-500 flex-shrink-0" /> :
-               tc.status === 'error' ? <XCircle size={8} className="text-red-500 flex-shrink-0" /> :
-               <Wrench size={8} className="text-blue-500 flex-shrink-0" />}
-              <span className="font-mono font-medium text-[var(--text-main)]">{tc.name}</span>
-              {tc.result && <span className="text-[var(--text-muted)] ml-auto truncate max-w-[220px]">{tc.result}</span>}
-            </div>
+            <ToolCallRow key={ti} tc={tc} />
           ))}
         </div>
       )}
@@ -670,12 +784,19 @@ const MessageBubble: React.FC<{
           ) : (
             <>
               <Sparkles size={9} className="text-purple-500" />
-              <span className="text-[10px] font-bold text-purple-500 uppercase">{msg.provider || 'Copilot'}</span>
-              {msg.codesSynced > 0 && (
-                <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium ml-auto flex items-center gap-0.5">
-                  <CheckCircle size={7} /> {msg.codesSynced} 已同步
-                </span>
-              )}
+              <span className="text-[10px] font-bold text-purple-500 uppercase">{msg.provider || 'free-code'}</span>
+              <div className="flex items-center gap-1.5 ml-auto">
+                {msg.codesSynced > 0 && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium flex items-center gap-0.5">
+                    <CheckCircle size={7} /> {msg.codesSynced} 已同步
+                  </span>
+                )}
+                {msg.durationMs !== undefined && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-slate-500/10 text-[var(--text-muted)] border border-[var(--border-color)] font-medium flex items-center gap-0.5">
+                    <Clock size={7} /> {(msg.durationMs / 1000).toFixed(1)}s
+                  </span>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -694,3 +815,85 @@ const MessageBubble: React.FC<{
 });
 
 MessageBubble.displayName = 'MessageBubble';
+
+/* ------------------------------------------------------------------ */
+/*  ThinkingBlock — collapsible thinking steps                       */
+/* ------------------------------------------------------------------ */
+
+const ThinkingBlock: React.FC<{ steps: ThinkingStep[] }> = ({ steps }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mb-1.5 rounded-md border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 transition-colors"
+      >
+        <Brain size={9} />
+        <span className="font-medium">思考过程 ({steps.length} 步)</span>
+        <span className="ml-auto">{open ? <ChevronDown size={9} /> : <ChevronRight size={9} />}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-2 space-y-1 border-t border-purple-500/10">
+          {steps.map((step, si) => (
+            <div key={si} className="flex items-start gap-1.5 pt-1 text-[11px] text-[var(--text-muted)]">
+              <Terminal size={7} className="text-purple-400 mt-0.5 flex-shrink-0" />
+              <span className="leading-relaxed">{step.content}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/*  ToolCallRow — single completed tool call with expandable result  */
+/* ------------------------------------------------------------------ */
+
+const ToolCallRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
+  const [expanded, setExpanded] = useState(false);
+  const summary = getToolSummary(tc.name, tc.input);
+  const label = getToolLabel(tc.name);
+  const hasResult = Boolean(tc.result?.trim());
+
+  return (
+    <div className={cn(
+      'rounded-md border text-[11px] overflow-hidden',
+      tc.status === 'completed' ? 'border-[var(--border-color)] bg-[var(--bg-main)]' : 'border-red-500/20 bg-red-500/5',
+    )}>
+      <button
+        onClick={() => hasResult && setExpanded(v => !v)}
+        className={cn(
+          'w-full flex items-center gap-1.5 px-2 py-1 transition-colors',
+          hasResult ? 'hover:bg-[var(--border-color)]/50 cursor-pointer' : 'cursor-default',
+        )}
+      >
+        <span className={tc.status === 'completed' ? 'text-emerald-500' : 'text-red-500'}>
+          {tc.status === 'completed'
+            ? <CheckCircle size={8} />
+            : <XCircle size={8} />}
+        </span>
+        <span className="text-[var(--text-muted)]">
+          <ToolIcon name={tc.name} size={8} />
+        </span>
+        <span className="font-mono font-medium text-[var(--text-main)]">{label}</span>
+        {summary && (
+          <span className="text-[var(--text-muted)] truncate flex-1 max-w-[200px] text-left">{summary}</span>
+        )}
+        {hasResult && (
+          <span className="ml-auto text-[var(--text-muted)]">
+            {expanded ? <ChevronDown size={8} /> : <ChevronRight size={8} />}
+          </span>
+        )}
+      </button>
+      {expanded && hasResult && (
+        <div className="px-3 pb-2 pt-1 border-t border-[var(--border-color)] bg-slate-50 dark:bg-slate-900/50">
+          <pre className="text-[11px] font-mono text-[var(--text-muted)] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto">
+            {tc.result}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+};

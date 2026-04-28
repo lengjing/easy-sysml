@@ -40,6 +40,7 @@ import { projectsRouter } from './routes/projects.js';
 import { filesRouter } from './routes/files.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { chatRouter } from './routes/chat.js';
+import { directChatRouter } from './routes/directChat.js';
 
 dotenv.config();
 
@@ -72,6 +73,7 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/projects/:projectId/files', filesRouter);
 app.use('/api/projects/:projectId/sessions', sessionsRouter);
 app.use('/api/sessions/:sessionId/chat', chatRouter);
+app.use('/api/chat', directChatRouter);
 
 /* ------------------------------------------------------------------ */
 /*  GET /api/status                                                   */
@@ -83,6 +85,9 @@ app.get('/api/status', (_req, res) => {
     ok: true,
     server: 'sysml-server',
     version: '0.1.0',
+    // configured is always true — free-code reachability is checked at chat time
+    configured: true,
+    providerLabel: 'free-code',
     free_code_server_url: freeCodeUrl,
   });
 });
