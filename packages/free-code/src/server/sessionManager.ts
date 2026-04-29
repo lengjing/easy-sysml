@@ -15,6 +15,7 @@ export type CreateSessionOptions = {
   allowedTools?: string[]
   dangerouslySkipPermissions?: boolean
   maxTurns?: number
+  mcpConfig?: string[]
   model?: string
   prompt?: string
   systemPrompt?: string
@@ -49,6 +50,7 @@ export class SessionManager {
     cwd?: string
     dangerouslySkipPermissions?: boolean
     maxTurns?: number
+    mcpConfig?: string[]
     model?: string
     prompt?: string
     systemPrompt?: string
@@ -74,6 +76,7 @@ export class SessionManager {
       allowedTools: opts.allowedTools,
       dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
       maxTurns: opts.maxTurns,
+      mcpConfig: opts.mcpConfig,
       model: opts.model,
       prompt: opts.prompt,
       systemPrompt: opts.systemPrompt,

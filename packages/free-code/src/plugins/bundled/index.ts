@@ -14,10 +14,47 @@
  * 2. Call registerBuiltinPlugin() with the plugin definition here
  */
 
+import { existsSync } from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { registerBuiltinPlugin } from '../builtinPlugins.js'
+
+const nodeCommand = process.release?.name === 'node' ? process.execPath : 'node'
+
+function resolveSysmlLanguageServerEntry(): string | null {
+  try {
+    const packageMainUrl = import.meta.resolve('@easy-sysml/language-server/main')
+    const packageMainPath = fileURLToPath(packageMainUrl)
+    const packageRoot = path.resolve(path.dirname(packageMainPath), '..')
+    const binEntry = path.join(packageRoot, 'bin', 'sysml-language-server.js')
+    return existsSync(binEntry) ? binEntry : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Initialize built-in plugins. Called during CLI startup.
  */
 export function initBuiltinPlugins(): void {
-  // No built-in plugins registered yet — this is the scaffolding for
-  // migrating bundled skills that should be user-toggleable.
+  const sysmlLanguageServerEntry = resolveSysmlLanguageServerEntry()
+
+  registerBuiltinPlugin({
+    name: 'sysml-lsp',
+    description: 'SysML v2 and KerML language server for .sysml and .kerml files.',
+    defaultEnabled: true,
+    isAvailable: () => sysmlLanguageServerEntry !== null,
+    lspServers: {
+      sysml: {
+        command: nodeCommand,
+        args: sysmlLanguageServerEntry ? [sysmlLanguageServerEntry] : [],
+        extensionToLanguage: {
+          '.sysml': 'sysml',
+          '.kerml': 'kerml',
+        },
+        startupTimeout: 10000,
+        restartOnCrash: true,
+      },
+    },
+  })
 }

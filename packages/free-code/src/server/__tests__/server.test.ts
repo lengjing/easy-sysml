@@ -12,6 +12,7 @@ import type { ServerConfig } from '../types.js'
 
 class TestBackend implements SessionBackend {
   createSession(options: CreateSessionOptions): ChildProcess {
+    lastCreateSessionOptions = options
     const script = [
       "const readline = require('node:readline');",
       "console.log(JSON.stringify({ type: 'system', subtype: 'ready' }));",
@@ -26,6 +27,8 @@ class TestBackend implements SessionBackend {
     })
   }
 }
+
+let lastCreateSessionOptions: CreateSessionOptions | undefined
 
 class StreamingBackend implements SessionBackend {
   createSession(options: CreateSessionOptions): ChildProcess {
@@ -244,6 +247,36 @@ describe('server command runtime modules', () => {
     } finally {
       await testServer.sessions.destroyAll()
       testServer.server.stop(true)
+    }
+  })
+
+  it('forwards mcp_config entries to the backend', async () => {
+    const testServer = await startTestServer()
+    const mcpConfig = [
+      JSON.stringify({
+        mcpServers: {
+          sysml_editor: {
+            type: 'stdio',
+            command: process.execPath,
+            args: ['-e', 'process.exit(0)'],
+          },
+        },
+      }),
+    ]
+
+    try {
+      const create = await makeReq(testServer.base, '/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cwd: process.cwd(), mcp_config: mcpConfig }),
+      })
+
+      expect(create.status).toBe(201)
+      expect(lastCreateSessionOptions?.mcpConfig).toEqual(mcpConfig)
+    } finally {
+      await testServer.sessions.destroyAll()
+      testServer.server.stop(true)
+      lastCreateSessionOptions = undefined
     }
   })
 

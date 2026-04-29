@@ -271,6 +271,9 @@ importers:
       '@anthropic-ai/mcpb':
         specifier: ^2.1.2
         version: 2.1.2
+      '@easy-sysml/language-server':
+        specifier: workspace:*
+        version: link:../language-server
       '@anthropic-ai/sandbox-runtime':
         specifier: ^0.0.44
         version: 0.0.44

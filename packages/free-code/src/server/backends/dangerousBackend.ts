@@ -58,6 +58,9 @@ export class DangerousBackend implements SessionBackend {
     if (options.allowedTools?.length) {
       args.push('--allowed-tools', ...options.allowedTools)
     }
+    if (options.mcpConfig?.length) {
+      args.push('--mcp-config', ...options.mcpConfig)
+    }
     if (options.prompt) {
       args.push(options.prompt)
     }

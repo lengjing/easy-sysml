@@ -101,6 +101,9 @@ export async function startServer(
           dangerouslySkipPermissions: Boolean(body.dangerously_skip_permissions),
           maxTurns:
             body.max_turns !== undefined ? Number(body.max_turns) : undefined,
+          mcpConfig: Array.isArray(body.mcp_config)
+            ? (body.mcp_config as string[])
+            : undefined,
           model: body.model as string | undefined,
           prompt: body.prompt as string | undefined,
           systemPrompt: body.system_prompt as string | undefined,
