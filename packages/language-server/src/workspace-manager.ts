@@ -13,9 +13,11 @@ import { loadStdlib } from './stdlib/loader.js';
 
 export class SysMLWorkspaceManager extends DefaultWorkspaceManager {
   private connection?: Connection;
+  private readonly shared: LangiumSharedServices;
 
   constructor(services: LangiumSharedServices) {
     super(services);
+    this.shared = services;
     this.connection = services.lsp?.Connection;
   }
 
@@ -34,7 +36,11 @@ export class SysMLWorkspaceManager extends DefaultWorkspaceManager {
     await super.loadAdditionalDocuments(folders, collector);
 
     this.log('[SysML] Loading standard library...');
-    const result = await loadStdlib(this.serviceRegistry as any, { verbose: false });
+    const result = await loadStdlib(this.shared, {
+      build: false,
+      collector,
+      verbose: false,
+    });
     this.log(`[SysML] Stdlib: ${result.filesLoaded}/${result.filesExpected} files in ${result.loadTimeMs}ms`);
 
     if (result.errors.length > 0) {

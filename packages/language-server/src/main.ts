@@ -35,7 +35,7 @@ function suppressChevrotainWarnings<T>(fn: () => T): T {
   }
 }
 
-export function startServer(): void {
+export async function startServer(): Promise<void> {
   const connection = createConnection(ProposedFeatures.all);
 
   const { shared } = suppressChevrotainWarnings(() =>
@@ -51,11 +51,11 @@ export function startServer(): void {
 
 // Auto-start when run directly
 if (typeof require !== 'undefined' && require.main === module) {
-  startServer();
+  void startServer();
 } else if (
   typeof process !== 'undefined' &&
   process.argv[1] &&
   (process.argv[1].endsWith('main.js') || process.argv[1].endsWith('sysml-language-server.js'))
 ) {
-  startServer();
+  void startServer();
 }

@@ -41,6 +41,10 @@ export interface StdlibLoadOptions {
   verbose?: boolean;
   /** Whether to run validation on stdlib files (default: false) */
   validate?: boolean;
+  /** Whether to build documents immediately (default: true) */
+  build?: boolean;
+  /** Optional collector for integrating with Langium workspace startup */
+  collector?: (document: LangiumDocument) => void;
 }
 
 /**
@@ -106,6 +110,8 @@ export async function loadStdlib(
   const startTime = Date.now();
   const errors: string[] = [];
   const warnings: string[] = [];
+  const collector = options.collector;
+  const shouldBuild = options.build ?? true;
   const verbose = options.verbose ?? false;
   const validate = options.validate ?? false;
 
@@ -151,6 +157,7 @@ export async function loadStdlib(
           const doc = langiumDocuments.getDocument(uri) as StdlibDocument;
           doc.isStandard = true;
           allDocuments.push(doc);
+          collector?.(doc);
           loadedCount++;
           continue;
         }
@@ -162,6 +169,7 @@ export async function loadStdlib(
 
         langiumDocuments.addDocument(document);
         allDocuments.push(document);
+        collector?.(document);
         loadedCount++;
 
         if (verbose) {
@@ -175,7 +183,7 @@ export async function loadStdlib(
   }
 
   // Build all documents in a single batch (much faster than individual builds)
-  if (allDocuments.length > 0) {
+  if (shouldBuild && allDocuments.length > 0) {
     try {
       if (verbose) {
         console.log(`[stdlib] Building ${allDocuments.length} documents...`);
