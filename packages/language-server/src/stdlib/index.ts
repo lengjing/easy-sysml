@@ -4,8 +4,16 @@
  * SysML v2 / KerML standard library files and loader.
  */
 
-export { loadStdlib, findStdlibPath, isStandardLibraryDocument } from './loader.js';
-export type { StdlibLoadResult, StdlibLoadOptions, StdlibDocument } from './loader.js';
+export { loadStdlib, findStdlibPath } from './loader.js';
+export {
+  getStdlibDocumentUri,
+  isStandardLibraryDocument,
+  isStandardLibraryUri,
+  markStandardLibraryDocument,
+  STDLIB_URI_SCHEME,
+} from './document-identity.js';
+export type { StdlibLoadResult, StdlibLoadOptions } from './loader.js';
+export type { StdlibDocument } from './document-identity.js';
 
 export {
   STDLIB_DEPENDENCY_LAYERS,

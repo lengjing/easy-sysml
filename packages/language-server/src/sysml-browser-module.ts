@@ -19,6 +19,8 @@ import {
 import { SysMLNameProvider } from './references/name-provider.js';
 import { SysMLScopeComputation } from './references/scope-computation.js';
 import { createSysMLScopeProvider } from './references/scope-provider.js';
+import { FilteringDocumentValidator } from './validation/filtering-document-validator.js';
+import { SysMLDefinitionProvider } from './lsp/definition-provider.js';
 import { SysMLDocumentSymbolProvider } from './lsp/document-symbol-provider.js';
 import { SysMLHoverProvider } from './lsp/hover-provider.js';
 import { SysMLBrowserWorkspaceManager } from './workspace/browser-workspace-manager.js';
@@ -84,7 +86,11 @@ const SysMLBrowserModule: Module<SysMLServices, any> = {
     ScopeComputation: (services: SysMLServices) => new SysMLScopeComputation(services),
     ScopeProvider: (services: SysMLServices) => createSysMLScopeProvider(services),
   },
+  validation: {
+    DocumentValidator: (services: SysMLServices) => new FilteringDocumentValidator(services),
+  },
   lsp: {
+    DefinitionProvider: (services: any) => new SysMLDefinitionProvider(services),
     DocumentSymbolProvider: (services: any) => new SysMLDocumentSymbolProvider(services),
     HoverProvider: (services: any) => new SysMLHoverProvider(services),
   },
@@ -97,7 +103,11 @@ const KerMLBrowserModule: Module<KerMLServices, any> = {
     ScopeComputation: (services: KerMLServices) => new SysMLScopeComputation(services),
     ScopeProvider: (services: KerMLServices) => createSysMLScopeProvider(services),
   },
+  validation: {
+    DocumentValidator: (services: KerMLServices) => new FilteringDocumentValidator(services),
+  },
   lsp: {
+    DefinitionProvider: (services: any) => new SysMLDefinitionProvider(services),
     DocumentSymbolProvider: (services: any) => new SysMLDocumentSymbolProvider(services),
     HoverProvider: (services: any) => new SysMLHoverProvider(services),
   },

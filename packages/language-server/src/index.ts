@@ -11,10 +11,14 @@ export type { SysMLServices, KerMLServices } from './sysml-module.js';
 export {
   loadStdlib,
   findStdlibPath,
+  getStdlibDocumentUri,
   isStandardLibraryDocument,
+  isStandardLibraryUri,
+  markStandardLibraryDocument,
+  STDLIB_URI_SCHEME,
   STDLIB_DEPENDENCY_LAYERS,
   STDLIB_FILE_COUNT,
   getStdlibFiles,
   isStdlibFile,
 } from './stdlib/index.js';
-export type { StdlibLoadResult, StdlibLoadOptions, StdlibDocument } from './stdlib/loader.js';
+export type { StdlibLoadResult, StdlibLoadOptions, StdlibDocument } from './stdlib/index.js';

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { EmptyFileSystem, URI, type LangiumDocument } from 'langium';
+import { EmptyFileSystem, type LangiumDocument } from 'langium';
 import { createSysMLBrowserServices } from '../../sysml-browser-module.js';
 import { STDLIB_DEPENDENCY_LAYERS } from '../config.js';
+import { getStdlibDocumentUri } from '../document-identity.js';
 // stdlib-browser-bundle.js is generated into dist/ by scripts/bundle-browser.cjs
 import { STDLIB_FILES } from '../../../dist/stdlib-browser-bundle.js';
 
@@ -18,7 +19,7 @@ describe('stdlib reference resolution', () => {
       for (const filename of layer) {
         const content = STDLIB_FILES[filename];
         if (!content) continue;
-        const uri = URI.parse(`inmemory:///stdlib/${filename}`);
+        const uri = getStdlibDocumentUri(filename);
         const doc = LangiumDocumentFactory.fromString(content, uri);
         LangiumDocuments.addDocument(doc);
         allDocs.push(doc);

@@ -9,7 +9,6 @@
  */
 
 import {
-  URI,
   type LangiumDocument,
   type LangiumSharedCoreServices,
 } from 'langium';
@@ -17,11 +16,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { STDLIB_DEPENDENCY_LAYERS } from './config.js';
-
-/** Marker interface for stdlib documents */
-export interface StdlibDocument extends LangiumDocument {
-  isStandard?: boolean;
-}
+import {
+  getStdlibDocumentUri,
+  isStandardLibraryDocument,
+  markStandardLibraryDocument,
+  type StdlibDocument,
+} from './document-identity.js';
 
 /** Result of loading the standard library */
 export interface StdlibLoadResult {
@@ -150,12 +150,11 @@ export async function loadStdlib(
       }
 
       try {
-        const uri = URI.file(filePath);
+        const uri = getStdlibDocumentUri(filename);
 
         // Check if already loaded
         if (langiumDocuments.hasDocument(uri)) {
-          const doc = langiumDocuments.getDocument(uri) as StdlibDocument;
-          doc.isStandard = true;
+          const doc = markStandardLibraryDocument(langiumDocuments.getDocument(uri) as StdlibDocument);
           allDocuments.push(doc);
           collector?.(doc);
           loadedCount++;
@@ -163,9 +162,8 @@ export async function loadStdlib(
         }
 
         // Load the document
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const document = documentFactory.fromString(content, uri) as StdlibDocument;
-        document.isStandard = true;
+          const content = fs.readFileSync(filePath, 'utf-8');
+          const document = markStandardLibraryDocument(documentFactory.fromString(content, uri) as StdlibDocument);
 
         langiumDocuments.addDocument(document);
         allDocuments.push(document);
@@ -199,7 +197,7 @@ export async function loadStdlib(
 
   // Clear diagnostics for stdlib documents (linking warnings from incomplete deps)
   for (const doc of allDocuments) {
-    if ((doc as StdlibDocument).isStandard && doc.diagnostics && doc.diagnostics.length > 0) {
+    if (isStandardLibraryDocument(doc) && doc.diagnostics && doc.diagnostics.length > 0) {
       doc.diagnostics = [];
     }
   }
@@ -218,11 +216,4 @@ export async function loadStdlib(
     warnings,
     loadTimeMs,
   };
-}
-
-/**
- * Check if a Langium document is a standard library document.
- */
-export function isStandardLibraryDocument(doc: LangiumDocument): boolean {
-  return (doc as StdlibDocument).isStandard === true;
 }

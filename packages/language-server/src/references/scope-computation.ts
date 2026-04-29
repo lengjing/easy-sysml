@@ -18,8 +18,7 @@ import type {
 } from 'langium';
 import { MultiMap } from 'langium';
 import type { LocalSymbols } from 'langium';
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { getPrimaryName, getShortName, hasIdentifier } from '../ast-names.js';
 
 export class SysMLScopeComputation implements ScopeComputation {
   private readonly services: LangiumCoreServices;
@@ -50,7 +49,7 @@ export class SysMLScopeComputation implements ScopeComputation {
     document: LangiumDocument,
     qualifiedPrefix: string[],
   ): void {
-    const name = this.getName(node);
+    const name = getPrimaryName(node);
     if (name) {
       exports.push(this.createDescription(node, name, document));
 
@@ -81,7 +80,7 @@ export class SysMLScopeComputation implements ScopeComputation {
       }
     }
 
-    const shortName = this.getShortName(node);
+    const shortName = getShortName(node);
     if (shortName && shortName !== name) {
       exports.push(this.createDescription(node, shortName, document));
       for (let i = 0; i < qualifiedPrefix.length; i++) {
@@ -100,11 +99,11 @@ export class SysMLScopeComputation implements ScopeComputation {
   ): void {
     if (this.isNamespace(node)) {
       this.traverseChildren(node, (child) => {
-        const childName = this.getName(child);
+        const childName = getPrimaryName(child);
         if (childName) {
           scopes.add(node, this.createDescription(child, childName, document));
         }
-        const childShort = this.getShortName(child);
+        const childShort = getShortName(child);
         if (childShort && childShort !== childName) {
           scopes.add(node, this.createDescription(child, childShort, document));
         }
@@ -112,16 +111,6 @@ export class SysMLScopeComputation implements ScopeComputation {
     }
 
     this.traverseChildren(node, (child) => this.computeScopes(child, scopes, document));
-  }
-
-  private getName(node: AstNode): string | undefined {
-    const n = node as any;
-    return n.declaredName ?? n.name ?? n.memberName ?? undefined;
-  }
-
-  private getShortName(node: AstNode): string | undefined {
-    const n = node as any;
-    return n.declaredShortName ?? n.shortName ?? n.memberShortName ?? undefined;
   }
 
   private isMembership(node: AstNode): boolean {
@@ -153,7 +142,7 @@ export class SysMLScopeComputation implements ScopeComputation {
 
     if (Array.isArray(n.ownedRelationship)) {
       for (const rel of n.ownedRelationship) {
-        if (rel?.memberName || rel?.memberShortName) {
+        if (rel && typeof rel === 'object' && '$type' in rel && hasIdentifier(rel as AstNode)) {
           emit(rel);
         }
         if (Array.isArray(rel?.ownedRelatedElement)) {

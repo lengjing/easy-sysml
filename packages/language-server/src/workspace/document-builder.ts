@@ -7,6 +7,7 @@
  */
 
 import { DefaultDocumentBuilder, type LangiumDocument, type LangiumSharedCoreServices } from 'langium';
+import { isStandardLibraryDocument } from '../stdlib/document-identity.js';
 
 export class SysMLDocumentBuilder extends DefaultDocumentBuilder {
   constructor(services: LangiumSharedCoreServices) {
@@ -14,7 +15,7 @@ export class SysMLDocumentBuilder extends DefaultDocumentBuilder {
   }
 
   protected override shouldRelink(document: LangiumDocument, changedUris: Set<string>): boolean {
-    if ((document as any).isStandard === true) {
+    if (isStandardLibraryDocument(document)) {
       return false;
     }
     return super.shouldRelink(document, changedUris);

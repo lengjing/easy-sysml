@@ -6,8 +6,9 @@
  * in the browser by accepting file contents as strings.
  */
 
-import { URI, type LangiumDocument, type LangiumSharedCoreServices } from 'langium';
+import type { LangiumDocument, LangiumSharedCoreServices } from 'langium';
 import { STDLIB_DEPENDENCY_LAYERS } from './config.js';
+import { getStdlibDocumentUri, markStandardLibraryDocument } from './document-identity.js';
 
 export interface StdlibBrowserResult {
   success: boolean;
@@ -41,7 +42,11 @@ export async function loadStdlibBrowser(
   const errors: string[] = [];
   let loaded = 0;
 
-  const { LangiumDocuments: langiumDocuments, DocumentBuilder: documentBuilder, LangiumDocumentFactory: documentFactory } = shared.workspace;
+  const {
+    LangiumDocuments: langiumDocuments,
+    DocumentBuilder: documentBuilder,
+    LangiumDocumentFactory: documentFactory,
+  } = shared.workspace;
 
   const allDocuments: LangiumDocument[] = [];
 
@@ -55,20 +60,18 @@ export async function loadStdlibBrowser(
       }
 
       try {
-        const uri = URI.parse(`inmemory:///stdlib/${filename}`);
+        const uri = getStdlibDocumentUri(filename);
 
         if (langiumDocuments.hasDocument(uri)) {
           const document = langiumDocuments.getDocument(uri);
           if (document) {
-            (document as any).isStandard = true;
+            markStandardLibraryDocument(document);
             collector?.(document);
             loaded++;
             continue;
           }
         }
-
-        const document = documentFactory.fromString(content, uri);
-        (document as any).isStandard = true;
+    const document = markStandardLibraryDocument(documentFactory.fromString(content, uri));
         langiumDocuments.addDocument(document);
         allDocuments.push(document);
         collector?.(document);
@@ -103,9 +106,3 @@ export async function loadStdlibBrowser(
   };
 }
 
-/**
- * Check if a Langium document is a standard library document (browser-compatible).
- */
-export function isStandardLibraryDocument(doc: LangiumDocument): boolean {
-  return (doc as any).isStandard === true;
-}
