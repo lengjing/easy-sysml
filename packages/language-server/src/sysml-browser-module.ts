@@ -21,6 +21,7 @@ import { SysMLScopeComputation } from './sysml-scope-computation.js';
 import { createSysMLScopeProvider } from './sysml-scope-provider.js';
 import { SysMLDocumentSymbolProvider } from './sysml-document-symbol-provider.js';
 import { SysMLHoverProvider } from './sysml-hover-provider.js';
+import { SysMLBrowserWorkspaceManager } from './browser-workspace-manager.js';
 import { SysMLDocumentBuilder } from './sysml-document-builder.js';
 
 export type SysMLServices = LangiumCoreServices;
@@ -38,7 +39,7 @@ const KerMLProductionMetaData = {
 
 /**
  * Create SysML and KerML language services suitable for browser environments.
- * Uses EmptyFileSystem — no stdlib loading, no Node.js workspace manager.
+ * Uses EmptyFileSystem and a browser-specific workspace manager to inject the bundled stdlib.
  */
 export function createSysMLBrowserServices(context: DefaultSharedModuleContext): {
   shared: LangiumSharedServices;
@@ -71,6 +72,7 @@ export function createSysMLBrowserServices(context: DefaultSharedModuleContext):
 
 const SysMLBrowserSharedModule: Module<LangiumSharedServices, any> = {
   workspace: {
+    WorkspaceManager: (services: LangiumSharedServices) => new SysMLBrowserWorkspaceManager(services),
     DocumentBuilder: (services: LangiumSharedServices) => new SysMLDocumentBuilder(services),
   },
 };

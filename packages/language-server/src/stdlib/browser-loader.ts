@@ -16,6 +16,13 @@ export interface StdlibBrowserResult {
   loadTimeMs: number;
 }
 
+export interface StdlibBrowserLoadOptions {
+  /** Whether to build documents immediately (default: true) */
+  build?: boolean;
+  /** Optional collector for integrating with Langium workspace startup */
+  collector?: (document: LangiumDocument) => void;
+}
+
 /**
  * Load the SysML standard library into a Langium workspace from
  * pre-bundled string content.
@@ -26,8 +33,11 @@ export interface StdlibBrowserResult {
 export async function loadStdlibBrowser(
   shared: LangiumSharedCoreServices,
   files: Record<string, string>,
+  options: StdlibBrowserLoadOptions = {},
 ): Promise<StdlibBrowserResult> {
   const start = Date.now();
+  const collector = options.collector;
+  const shouldBuild = options.build ?? true;
   const errors: string[] = [];
   let loaded = 0;
 
@@ -48,14 +58,20 @@ export async function loadStdlibBrowser(
         const uri = URI.parse(`inmemory:///stdlib/${filename}`);
 
         if (langiumDocuments.hasDocument(uri)) {
-          loaded++;
-          continue;
+          const document = langiumDocuments.getDocument(uri);
+          if (document) {
+            (document as any).isStandard = true;
+            collector?.(document);
+            loaded++;
+            continue;
+          }
         }
 
         const document = documentFactory.fromString(content, uri);
         (document as any).isStandard = true;
         langiumDocuments.addDocument(document);
         allDocuments.push(document);
+        collector?.(document);
         loaded++;
       } catch (err) {
         errors.push(`${filename}: ${err instanceof Error ? err.message : String(err)}`);
@@ -64,7 +80,7 @@ export async function loadStdlibBrowser(
   }
 
   // Build all documents in a single batch
-  if (allDocuments.length > 0) {
+  if (shouldBuild && allDocuments.length > 0) {
     try {
       await documentBuilder.build(allDocuments, { validation: false });
     } catch {
