@@ -9,7 +9,7 @@ import { DefaultWorkspaceManager, type LangiumDocument, type URI } from 'langium
 import type { FileSystemNode } from 'langium';
 import type { LangiumSharedServices } from 'langium/lsp';
 import type { WorkspaceFolder, Connection } from 'vscode-languageserver';
-import { loadStdlib } from './stdlib/loader.js';
+import { loadStdlib } from '../stdlib/loader.js';
 
 export class SysMLWorkspaceManager extends DefaultWorkspaceManager {
   private connection?: Connection;

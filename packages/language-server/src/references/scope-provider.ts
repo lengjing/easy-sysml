@@ -31,17 +31,13 @@ export class SysMLScopeProvider extends DefaultScopeProvider {
 
   override getScope(context: ReferenceInfo): Scope {
     const scopes: Stream<AstNodeDescription>[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const doc = (context.container as any).$document ?? findDocument(context.container);
     const localSymbols = doc?.localSymbols;
 
     if (localSymbols) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let currentNode: any = context.container;
       do {
         if (localSymbols.has(currentNode)) {
-          // Do NOT filter by reference type — the grammar type hierarchy
-          // doesn't reflect SysML's semantic subtyping.
           scopes.push(localSymbols.getStream(currentNode));
         }
         currentNode = currentNode.$container;
@@ -55,9 +51,6 @@ export class SysMLScopeProvider extends DefaultScopeProvider {
     return result;
   }
 
-  /**
-   * Return all exported elements regardless of grammar-level type.
-   */
   private getSysMLGlobalScope(_context: ReferenceInfo): Scope {
     return this.globalScopeCache.get('__sysml__', () =>
       new MultiMapScope(this.indexManager.allElements()),
@@ -65,8 +58,6 @@ export class SysMLScopeProvider extends DefaultScopeProvider {
   }
 }
 
-/** Walk up to find the document root */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function findDocument(node: any): any {
   let current = node;
   while (current?.$container) {

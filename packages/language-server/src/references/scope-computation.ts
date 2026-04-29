@@ -52,11 +52,8 @@ export class SysMLScopeComputation implements ScopeComputation {
   ): void {
     const name = this.getName(node);
     if (name) {
-      // Export with simple name
       exports.push(this.createDescription(node, name, document));
 
-      // Export all qualified name suffixes so that references like
-      // "Anything::self" resolve (not just "Base::Anything::self").
       if (qualifiedPrefix.length > 0) {
         for (let i = 0; i < qualifiedPrefix.length; i++) {
           const qn = [...qualifiedPrefix.slice(i), name].join('::');
@@ -69,7 +66,6 @@ export class SysMLScopeComputation implements ScopeComputation {
         exports.push(this.createDescription(container, name, document));
       }
 
-      // Conjugated port definition (synthetic ~Name entry per SysML v2 spec)
       if (node.$type === 'PortDefinition') {
         const conjugatedName = '~' + name;
         exports.push({
@@ -85,7 +81,6 @@ export class SysMLScopeComputation implements ScopeComputation {
       }
     }
 
-    // Short name support
     const shortName = this.getShortName(node);
     if (shortName && shortName !== name) {
       exports.push(this.createDescription(node, shortName, document));
@@ -94,7 +89,6 @@ export class SysMLScopeComputation implements ScopeComputation {
       }
     }
 
-    // Build qualified prefix for children: only namespaces contribute to the path
     const childPrefix = name && this.isNamespace(node) ? [...qualifiedPrefix, name] : qualifiedPrefix;
     this.traverseChildren(node, (child) => this.collectExports(child, exports, document, childPrefix));
   }
@@ -139,8 +133,6 @@ export class SysMLScopeComputation implements ScopeComputation {
 
   private isNamespace(node: AstNode): boolean {
     const n = node as any;
-    // Any named element that owns members acts as a namespace for
-    // qualified name resolution (e.g., DataType, Association, etc.)
     if (Array.isArray(n.ownedRelationship) && n.ownedRelationship.length > 0) {
       return true;
     }
@@ -151,8 +143,6 @@ export class SysMLScopeComputation implements ScopeComputation {
 
   private traverseChildren(node: AstNode, callback: (child: AstNode) => void): void {
     const n = node as any;
-    // Deduplicate: ownedRelatedElement and ownedMemberElement may reference
-    // the same AstNode, causing exponential blowup without a guard.
     const seen = new Set<unknown>();
     const emit = (child: unknown) => {
       if (child && typeof child === 'object' && '$type' in (child as any) && !seen.has(child)) {
@@ -163,8 +153,6 @@ export class SysMLScopeComputation implements ScopeComputation {
 
     if (Array.isArray(n.ownedRelationship)) {
       for (const rel of n.ownedRelationship) {
-        // Emit the relationship node itself if it carries a name
-        // (e.g., AliasMember / Membership with memberName).
         if (rel?.memberName || rel?.memberShortName) {
           emit(rel);
         }
@@ -173,10 +161,6 @@ export class SysMLScopeComputation implements ScopeComputation {
         } else if (rel?.ownedRelatedElement) {
           emit(rel.ownedRelatedElement);
         }
-        // NOTE: memberElement is a cross-reference (Reference<Element>).
-        // Accessing it during scope computation can trigger lazy resolution,
-        // which re-enters scope computation → infinite recursion.
-        // Only traverse owned containment properties.
         if (rel?.ownedMemberElement) {
           emit(rel.ownedMemberElement);
         }

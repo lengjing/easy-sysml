@@ -12,17 +12,10 @@ import { SymbolKind, type DocumentSymbol, type DocumentSymbolParams, type Cancel
 import type { AstNode, CstNode, MaybePromise, LangiumDocument } from 'langium';
 import { DefaultDocumentSymbolProvider, type LangiumServices } from 'langium/lsp';
 
-/* ------------------------------------------------------------------ */
-/*  AST $type → SymbolKind mapping                                    */
-/* ------------------------------------------------------------------ */
-
 const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
-  // Packages / namespaces
   Package:                     SymbolKind.Package,
   LibraryPackage:              SymbolKind.Package,
   Namespace:                   SymbolKind.Namespace,
-
-  // Definitions → Class
   PartDefinition:              SymbolKind.Class,
   AttributeDefinition:         SymbolKind.Class,
   PortDefinition:              SymbolKind.Class,
@@ -37,8 +30,6 @@ const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
   ViewDefinition:              SymbolKind.Class,
   ViewpointDefinition:         SymbolKind.Class,
   RenderingDefinition:         SymbolKind.Class,
-
-  // Behavioral definitions
   ActionDefinition:            SymbolKind.Method,
   StateDefinition:             SymbolKind.Method,
   CalculationDefinition:       SymbolKind.Function,
@@ -49,8 +40,6 @@ const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
   AnalysisCaseDefinition:      SymbolKind.Class,
   VerificationCaseDefinition:  SymbolKind.Class,
   UseCaseDefinition:           SymbolKind.Class,
-
-  // Usages → Variable / Property / Method
   PartUsage:                   SymbolKind.Variable,
   AttributeUsage:              SymbolKind.Property,
   PortUsage:                   SymbolKind.Variable,
@@ -62,8 +51,6 @@ const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
   EnumerationUsage:            SymbolKind.Variable,
   ReferenceUsage:              SymbolKind.Variable,
   MetadataUsage:               SymbolKind.Variable,
-
-  // Behavioral usages
   ActionUsage:                 SymbolKind.Method,
   StateUsage:                  SymbolKind.Method,
   CalculationUsage:            SymbolKind.Function,
@@ -90,8 +77,6 @@ const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
   TransitionUsage:             SymbolKind.Method,
   SatisfyRequirementUsage:     SymbolKind.Variable,
   AssertConstraintUsage:       SymbolKind.Variable,
-
-  // Relationships
   BindingConnector:            SymbolKind.Variable,
   BindingConnectorAsUsage:     SymbolKind.Variable,
   Succession:                  SymbolKind.Variable,
@@ -119,9 +104,6 @@ export class SysMLDocumentSymbolProvider extends DefaultDocumentSymbolProvider {
     }
   }
 
-  /**
-   * Override to set `detail` to the AST $type and a more accurate SymbolKind.
-   */
   protected override createSymbol(
     document: LangiumDocument,
     astNode: AstNode,

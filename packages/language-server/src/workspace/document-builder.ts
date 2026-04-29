@@ -14,7 +14,6 @@ export class SysMLDocumentBuilder extends DefaultDocumentBuilder {
   }
 
   protected override shouldRelink(document: LangiumDocument, changedUris: Set<string>): boolean {
-    // Never relink stdlib documents — they are immutable and fully linked at startup
     if ((document as any).isStandard === true) {
       return false;
     }

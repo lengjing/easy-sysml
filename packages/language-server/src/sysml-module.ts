@@ -20,14 +20,14 @@ import {
   SysMLLanguageMetaData,
   KerMLLanguageMetaData,
 } from '@easy-sysml/grammar';
-import { SysMLNameProvider } from './sysml-name-provider.js';
-import { SysMLScopeComputation } from './sysml-scope-computation.js';
-import { createSysMLScopeProvider } from './sysml-scope-provider.js';
+import { SysMLNameProvider } from './references/name-provider.js';
+import { SysMLScopeComputation } from './references/scope-computation.js';
+import { createSysMLScopeProvider } from './references/scope-provider.js';
 import { FilteringDocumentValidator } from './validation/filtering-document-validator.js';
-import { SysMLDocumentSymbolProvider } from './sysml-document-symbol-provider.js';
-import { SysMLHoverProvider } from './sysml-hover-provider.js';
-import { SysMLWorkspaceManager } from './workspace-manager.js';
-import { SysMLDocumentBuilder } from './sysml-document-builder.js';
+import { SysMLDocumentSymbolProvider } from './lsp/document-symbol-provider.js';
+import { SysMLHoverProvider } from './lsp/hover-provider.js';
+import { SysMLWorkspaceManager } from './workspace/workspace-manager.js';
+import { SysMLDocumentBuilder } from './workspace/document-builder.js';
 
 export type SysMLServices = LangiumCoreServices;
 export type KerMLServices = LangiumCoreServices;

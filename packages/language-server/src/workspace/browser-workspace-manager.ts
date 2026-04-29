@@ -8,7 +8,7 @@
 import { DefaultWorkspaceManager, type LangiumDocument } from 'langium';
 import type { LangiumSharedServices } from 'langium/lsp';
 import type { Connection, WorkspaceFolder } from 'vscode-languageserver';
-import { STDLIB_FILES, loadStdlibBrowser } from './stdlib/browser.js';
+import { STDLIB_FILES, loadStdlibBrowser } from '../stdlib/browser.js';
 
 export class SysMLBrowserWorkspaceManager extends DefaultWorkspaceManager {
   private connection?: Connection;
