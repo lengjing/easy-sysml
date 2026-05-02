@@ -132,8 +132,8 @@ const httpServer = createHttpServer((req, res) => {
     const list = Array.from(sessions.values()).map(s => ({
       id: s.id,
       status: s.status,
-      createdAt: s.createdAt,
-      workDir: s.workDir,
+      created_at: s.createdAt,
+      work_dir: s.workDir,
     }));
     jsonResponse(res, 200, list);
     return;
@@ -238,9 +238,15 @@ wss.on('connection', (ws, sessionId) => {
     const startMs = Date.now();
     let fullText = '';
 
+    // Build messages for DeepSeek: keep only the first system message (no duplicates)
+    const firstSystemIdx = session.history.findIndex(m => m.role === 'system');
+    const messagesForApi = session.history.filter(
+      (m, idx) => m.role !== 'system' || idx === firstSystemIdx,
+    );
+
     try {
       fullText = await callDeepSeek(
-        session.history.filter(m => m.role !== 'system' || session.history.indexOf(m) === 0),
+        messagesForApi,
         delta => {
           if (ws.readyState === ws.OPEN) {
             ws.send(JSON.stringify({ type: 'assistant_partial', delta }));

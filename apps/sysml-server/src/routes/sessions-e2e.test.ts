@@ -396,7 +396,11 @@ describe('sessions + chat end-to-end integration (real DeepSeek)', () => {
     expect(sessions.some(s => s.free_code_session_id !== null)).toBe(true);
     // Verify ordered by created_at DESC (first entry is latest)
     for (let i = 1; i < sessions.length; i++) {
-      expect(sessions[i - 1]!.created_at).toBeGreaterThanOrEqual(sessions[i]!.created_at);
+      const prev = sessions[i - 1];
+      const curr = sessions[i];
+      expect(prev).toBeDefined();
+      expect(curr).toBeDefined();
+      expect(prev!.created_at).toBeGreaterThanOrEqual(curr!.created_at);
     }
   });
 
