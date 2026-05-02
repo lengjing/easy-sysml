@@ -230,7 +230,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     res.end();
   };
 
-  req.on('close', finish);
+  res.on('close', finish);
 
   ws.on('open', () => {
     ws.send(
