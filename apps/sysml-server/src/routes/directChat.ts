@@ -152,58 +152,75 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     'X-Accel-Buffering': 'no',
   });
 
+  // The free-code CLI uses `-p` (print/headless) mode, which means the process exits
+  // after every single turn. We must create a fresh free-code session on every request.
+  // Multi-turn context is preserved by injecting the conversation history into the
+  // system prompt of the new session.
   const convId = clientConvId || uuidv4();
-  let convState = conversations.get(convId);
 
-  /* ---------- Create free-code session if needed ---------- */
+  /* ---------- Build system prompt with conversation history ---------- */
 
-  if (!convState) {
-    let systemPrompt = SYSML_SYSTEM_PROMPT;
-    if (currentCode?.trim()) {
-      systemPrompt += `\n\nCurrent editor code:\n\`\`\`sysml\n${currentCode.trim()}\n\`\`\`\n`;
+  let systemPrompt = SYSML_SYSTEM_PROMPT;
+  if (currentCode?.trim()) {
+    systemPrompt += `\n\nCurrent editor code:\n\`\`\`sysml\n${currentCode.trim()}\n\`\`\`\n`;
+  }
+
+  // Inject prior turns (all messages except the last user message) so the agent
+  // has full context when starting a fresh CLI process.
+  const priorMessages = messages.slice(0, -1).filter(
+    m => m.role === 'user' || m.role === 'assistant',
+  );
+  if (priorMessages.length > 0) {
+    systemPrompt += '\n\n---\nConversation so far:\n';
+    for (const m of priorMessages) {
+      const label = m.role === 'user' ? 'User' : 'Assistant';
+      systemPrompt += `\n${label}: ${m.content}\n`;
     }
+    systemPrompt += '\n---\n';
+  }
 
-    try {
-      const resp = await fetch(`${getFreeCodeUrl()}/sessions`, {
-        method: 'POST',
-        headers: freeCodeHeaders(),
-        body: JSON.stringify({
-          system_prompt: systemPrompt,
-          dangerously_skip_permissions: true,
-        }),
-      });
+  /* ---------- Create a fresh free-code session for every turn ---------- */
 
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => String(resp.status));
-        sseWrite(res, 'error', { content: `无法创建 free-code 会话: ${errText}` });
-        sseWrite(res, 'done', {});
-        res.end();
-        return;
-      }
+  let convState: ConversationState;
+  try {
+    const resp = await fetch(`${getFreeCodeUrl()}/sessions`, {
+      method: 'POST',
+      headers: freeCodeHeaders(),
+      body: JSON.stringify({
+        system_prompt: systemPrompt,
+        dangerously_skip_permissions: true,
+      }),
+    });
 
-      const { session_id, ws_url } = (await resp.json()) as {
-        session_id: string;
-        ws_url: string;
-      };
-
-      convState = {
-        freeCodeSessionId: session_id,
-        freeCodeWsUrl: ws_url,
-        lastActiveAt: Date.now(),
-      };
-      conversations.set(convId, convState);
-    } catch (err) {
-      sseWrite(res, 'error', {
-        content: `无法连接 free-code 服务器 (${getFreeCodeUrl()}): ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => String(resp.status));
+      sseWrite(res, 'error', { content: `无法创建 free-code 会话: ${errText}` });
       sseWrite(res, 'done', {});
       res.end();
       return;
     }
-  } else {
-    convState.lastActiveAt = Date.now();
+
+    const { session_id, ws_url } = (await resp.json()) as {
+      session_id: string;
+      ws_url: string;
+    };
+
+    convState = {
+      freeCodeSessionId: session_id,
+      freeCodeWsUrl: ws_url,
+      lastActiveAt: Date.now(),
+    };
+    // Store temporarily so the client convId stays stable across turns
+    conversations.set(convId, convState);
+  } catch (err) {
+    sseWrite(res, 'error', {
+      content: `无法连接 free-code 服务器 (${getFreeCodeUrl()}): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    });
+    sseWrite(res, 'done', {});
+    res.end();
+    return;
   }
 
   // Acknowledge the conversation ID to the client
@@ -221,6 +238,9 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
   const finish = () => {
     if (finished) return;
     finished = true;
+    // Remove from cache — each free-code turn creates a new CLI process,
+    // so cached state is stale after this point.
+    conversations.delete(convId);
     if (
       ws.readyState === WebSocket.OPEN ||
       ws.readyState === WebSocket.CONNECTING
