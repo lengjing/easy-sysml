@@ -894,7 +894,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             {/* Right: send / stop button — stop replaces send during generation */}
             {loading ? (
               <button
-                onClick={() => { abortRef.current?.abort(); abortRef.current = null; }}
+                onClick={() => { abortRef.current?.abort(); }}
                 className="w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0 bg-red-500 text-white hover:bg-red-600 shadow-sm shadow-red-500/20"
                 title="停止生成"
               >

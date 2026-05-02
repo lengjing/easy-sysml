@@ -112,10 +112,6 @@ function buildWsUrl(wsUrl: string): string {
 
 function sseWrite(res: Response, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  // Flush the socket so each SSE event is delivered immediately without being
-  // coalesced by TCP Nagle's algorithm — this enables character-by-character streaming.
-  const sock = (res as unknown as { socket?: { setNoDelay?: (v: boolean) => void } }).socket;
-  sock?.setNoDelay?.(true);
 }
 
 const MAX_TOOL_RESULT = 800;
@@ -308,8 +304,9 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
             conversations.set(convId, fresh);
             connectAndStream(fresh, true);
           })
-          .catch(() => {
-            sseWrite(res, 'error', { content: `WebSocket 错误: ${err.message}` });
+          .catch((sessionErr: unknown) => {
+            const msg = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
+            sseWrite(res, 'error', { content: `会话恢复失败: ${msg}` });
             sseWrite(res, 'done', {});
             finish();
           });
@@ -330,7 +327,9 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
             conversations.set(convId, fresh);
             connectAndStream(fresh, true);
           })
-          .catch(() => {
+          .catch((sessionErr: unknown) => {
+            const msg = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
+            sseWrite(res, 'error', { content: `会话恢复失败: ${msg}` });
             sseWrite(res, 'done', {});
             finish();
           });
