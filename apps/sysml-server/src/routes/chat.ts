@@ -104,7 +104,7 @@ chatRouter.post('/', async (req: Request, res: Response) => {
     }
   };
 
-  req.on('close', () => {
+  res.on('close', () => {
     finish();
   });
 

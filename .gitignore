@@ -7,4 +7,7 @@ v/
 packages/grammar/src/generated/
 apps/playground/src/generated/
 bin/
+# Allow the cross-platform launcher shim in free-code
+!packages/free-code/bin/
+!packages/free-code/bin/**
 .env
