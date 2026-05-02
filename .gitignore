@@ -3,8 +3,4 @@ dist/
 out/
 *.tsbuildinfo
 .DS_Store
-v/
-packages/grammar/src/generated/
-apps/playground/src/generated/
-bin/
 .env
