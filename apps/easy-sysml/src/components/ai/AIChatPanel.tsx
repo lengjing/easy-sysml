@@ -710,17 +710,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               <span className="text-[10px] font-medium tabular-nums">{sessions.length}</span>
             )}
           </button>
-          {/* Stop generation */}
-          {loading && (
-            <button
-              onClick={() => { abortRef.current?.abort(); }}
-              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-red-500 hover:bg-red-500/10 transition-colors border border-red-500/20"
-              title="停止生成"
-            >
-              <StopCircle size={11} />
-              <span>停止</span>
-            </button>
-          )}
           {/* New chat */}
           <button
             onClick={handleNewChat}
@@ -902,20 +891,30 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               <Terminal size={12} />
               <span className="font-mono">/</span>
             </button>
-            {/* Right: send button */}
-            <button
-              onClick={() => handleSend()}
-              disabled={loading || !input.trim() || !aiAvailable}
-              className={cn(
-                'w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0',
-                !loading && input.trim() && aiAvailable
-                  ? 'bg-purple-500 text-white hover:bg-purple-600 shadow-sm shadow-purple-500/20'
-                  : 'bg-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed',
-              )}
-              title="发送 (Enter)"
-            >
-              <ArrowUp size={13} />
-            </button>
+            {/* Right: send / stop button — stop replaces send during generation */}
+            {loading ? (
+              <button
+                onClick={() => { abortRef.current?.abort(); abortRef.current = null; }}
+                className="w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0 bg-red-500 text-white hover:bg-red-600 shadow-sm shadow-red-500/20"
+                title="停止生成"
+              >
+                <StopCircle size={13} />
+              </button>
+            ) : (
+              <button
+                onClick={() => handleSend()}
+                disabled={!input.trim() || !aiAvailable}
+                className={cn(
+                  'w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0',
+                  input.trim() && aiAvailable
+                    ? 'bg-purple-500 text-white hover:bg-purple-600 shadow-sm shadow-purple-500/20'
+                    : 'bg-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed',
+                )}
+                title="发送 (Enter)"
+              >
+                <ArrowUp size={13} />
+              </button>
+            )}
           </div>
         </div>
       </div>

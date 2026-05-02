@@ -112,6 +112,10 @@ function buildWsUrl(wsUrl: string): string {
 
 function sseWrite(res: Response, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // Flush the socket so each SSE event is delivered immediately without being
+  // coalesced by TCP Nagle's algorithm — this enables character-by-character streaming.
+  const sock = (res as unknown as { socket?: { setNoDelay?: (v: boolean) => void } }).socket;
+  sock?.setNoDelay?.(true);
 }
 
 const MAX_TOOL_RESULT = 800;
@@ -119,6 +123,38 @@ const MAX_TOOL_RESULT = 800;
 /* ------------------------------------------------------------------ */
 /*  POST /api/chat                                                     */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Create a fresh free-code session and return its state.
+ * The system_prompt captures the current editor code context so the agent
+ * always starts with up-to-date information.
+ */
+async function createFreeCodeSession(systemPrompt: string): Promise<ConversationState> {
+  const resp = await fetch(`${getFreeCodeUrl()}/sessions`, {
+    method: 'POST',
+    headers: freeCodeHeaders(),
+    body: JSON.stringify({
+      system_prompt: systemPrompt,
+      dangerously_skip_permissions: true,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => String(resp.status));
+    throw new Error(`无法创建 free-code 会话: ${errText}`);
+  }
+
+  const { session_id, ws_url } = (await resp.json()) as {
+    session_id: string;
+    ws_url: string;
+  };
+
+  return {
+    freeCodeSessionId: session_id,
+    freeCodeWsUrl: ws_url,
+    lastActiveAt: Date.now(),
+  };
+}
 
 directChatRouter.post('/', async (req: Request, res: Response) => {
   const {
@@ -144,6 +180,12 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     return;
   }
 
+  // Disable Nagle's algorithm for this connection immediately so every
+  // res.write() call results in an immediate TCP segment — this is the key
+  // to getting character-by-character SSE streaming to the browser.
+  const responseSock = (res as unknown as { socket?: { setNoDelay?: (v: boolean) => void } }).socket;
+  responseSock?.setNoDelay?.(true);
+
   // Send SSE headers immediately
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -152,154 +194,154 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     'X-Accel-Buffering': 'no',
   });
 
-  // The free-code CLI uses `-p` (print/headless) mode, which means the process exits
-  // after every single turn. We must create a fresh free-code session on every request.
-  // Multi-turn context is preserved by injecting the conversation history into the
-  // system prompt of the new session.
   const convId = clientConvId || uuidv4();
 
-  /* ---------- Build system prompt with conversation history ---------- */
-
+  /* ---------- Build system prompt ---------- */
+  // Only include the current editor code — conversation history is preserved
+  // naturally by the free-code session staying alive across turns.
   let systemPrompt = SYSML_SYSTEM_PROMPT;
   if (currentCode?.trim()) {
     systemPrompt += `\n\nCurrent editor code:\n\`\`\`sysml\n${currentCode.trim()}\n\`\`\`\n`;
   }
 
-  // Inject prior turns (all messages except the last user message) so the agent
-  // has full context when starting a fresh CLI process.
-  const priorMessages = messages.slice(0, -1).filter(
-    m => m.role === 'user' || m.role === 'assistant',
-  );
-  if (priorMessages.length > 0) {
-    systemPrompt += '\n\n---\nConversation so far:\n';
-    for (const m of priorMessages) {
-      const label = m.role === 'user' ? 'User' : 'Assistant';
-      systemPrompt += `\n${label}: ${m.content}\n`;
-    }
-    systemPrompt += '\n---\n';
-  }
+  /* ---------- Reuse existing session or create a new one ---------- */
+  let convState = conversations.get(convId);
 
-  /* ---------- Create a fresh free-code session for every turn ---------- */
-
-  let convState: ConversationState;
-  try {
-    const resp = await fetch(`${getFreeCodeUrl()}/sessions`, {
-      method: 'POST',
-      headers: freeCodeHeaders(),
-      body: JSON.stringify({
-        system_prompt: systemPrompt,
-        dangerously_skip_permissions: true,
-      }),
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => String(resp.status));
-      sseWrite(res, 'error', { content: `无法创建 free-code 会话: ${errText}` });
+  if (!convState) {
+    try {
+      convState = await createFreeCodeSession(systemPrompt);
+      conversations.set(convId, convState);
+    } catch (err) {
+      sseWrite(res, 'error', {
+        content: `无法连接 free-code 服务器 (${getFreeCodeUrl()}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      });
       sseWrite(res, 'done', {});
       res.end();
       return;
     }
-
-    const { session_id, ws_url } = (await resp.json()) as {
-      session_id: string;
-      ws_url: string;
-    };
-
-    convState = {
-      freeCodeSessionId: session_id,
-      freeCodeWsUrl: ws_url,
-      lastActiveAt: Date.now(),
-    };
-    // Store temporarily so the client convId stays stable across turns
-    conversations.set(convId, convState);
-  } catch (err) {
-    sseWrite(res, 'error', {
-      content: `无法连接 free-code 服务器 (${getFreeCodeUrl()}): ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    });
-    sseWrite(res, 'done', {});
-    res.end();
-    return;
+  } else {
+    convState.lastActiveAt = Date.now();
   }
 
   // Acknowledge the conversation ID to the client
   sseWrite(res, 'session', { conversationId: convId });
 
+  // lastUserMsg is guaranteed non-null here (we return early above if not found)
+  const userContent = lastUserMsg.content;
+
   /* ---------- Connect to free-code WebSocket and send message ---------- */
 
-  const ws = new WebSocket(buildWsUrl(convState.freeCodeWsUrl));
-  let finished = false;
-  const pendingToolUses = new Map<
-    string,
-    { name: string; input: Record<string, unknown> }
-  >();
+  /**
+   * Attempt to connect to a free-code session WebSocket and stream the
+   * response.  If the session has died (e.g. idle-timeout), the WS will
+   * fail immediately (before any message is received).  In that case we
+   * create a fresh session and retry exactly once.
+   */
+  function connectAndStream(state: ConversationState, isRetry: boolean): void {
+    const ws = new WebSocket(buildWsUrl(state.freeCodeWsUrl));
+    let finished = false;
+    let receivedAnyMessage = false;
+    const pendingToolUses = new Map<
+      string,
+      { name: string; input: Record<string, unknown> }
+    >();
 
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    // Remove from cache — each free-code turn creates a new CLI process,
-    // so cached state is stale after this point.
-    conversations.delete(convId);
-    if (
-      ws.readyState === WebSocket.OPEN ||
-      ws.readyState === WebSocket.CONNECTING
-    ) {
-      ws.close();
-    }
-    res.end();
-  };
-
-  req.on('close', finish);
-
-  ws.on('open', () => {
-    ws.send(
-      JSON.stringify({
-        type: 'user',
-        message: {
-          role: 'user',
-          content: lastUserMsg.content,
-        },
-        parent_tool_use_id: null,
-        session_id: convState.freeCodeSessionId,
-      }),
-    );
-  });
-
-  ws.on('message', (rawData: Buffer | string) => {
-    const raw =
-      typeof rawData === 'string' ? rawData : rawData.toString('utf-8');
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const msg = JSON.parse(trimmed) as Record<string, unknown>;
-        handleFreeCodeMsg(res, msg, pendingToolUses, autoApply);
-        if (msg.type === 'result') {
-          sseWrite(res, 'done', {});
-          finish();
-          return;
-        }
-      } catch {
-        // skip non-JSON lines (e.g. debug output)
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (
+        ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING
+      ) {
+        ws.close();
       }
-    }
-  });
+      res.end();
+    };
 
-  ws.on('error', (err: Error) => {
-    if (!finished) {
-      sseWrite(res, 'error', { content: `WebSocket 错误: ${err.message}` });
-      sseWrite(res, 'done', {});
-      finish();
-    }
-  });
+    req.on('close', finish);
 
-  ws.on('close', () => {
-    if (!finished) {
-      sseWrite(res, 'done', {});
-      finish();
-    }
-  });
+    ws.on('open', () => {
+      ws.send(
+        JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: userContent,
+          },
+          parent_tool_use_id: null,
+          session_id: state.freeCodeSessionId,
+        }),
+      );
+    });
+
+    ws.on('message', (rawData: Buffer | string) => {
+      receivedAnyMessage = true;
+      const raw =
+        typeof rawData === 'string' ? rawData : rawData.toString('utf-8');
+      for (const line of raw.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const msg = JSON.parse(trimmed) as Record<string, unknown>;
+          handleFreeCodeMsg(res, msg, pendingToolUses, autoApply);
+          if (msg.type === 'result') {
+            sseWrite(res, 'done', {});
+            finish();
+            return;
+          }
+        } catch {
+          // skip non-JSON lines (e.g. debug output)
+        }
+      }
+    });
+
+    ws.on('error', (err: Error) => {
+      if (finished) return;
+      if (!receivedAnyMessage && !isRetry) {
+        // Session likely died (idle timeout).  Remove the stale entry and
+        // retry once with a brand-new session.
+        conversations.delete(convId);
+        createFreeCodeSession(systemPrompt)
+          .then(fresh => {
+            conversations.set(convId, fresh);
+            connectAndStream(fresh, true);
+          })
+          .catch(() => {
+            sseWrite(res, 'error', { content: `WebSocket 错误: ${err.message}` });
+            sseWrite(res, 'done', {});
+            finish();
+          });
+      } else {
+        sseWrite(res, 'error', { content: `WebSocket 错误: ${err.message}` });
+        sseWrite(res, 'done', {});
+        finish();
+      }
+    });
+
+    ws.on('close', () => {
+      if (finished) return;
+      if (!receivedAnyMessage && !isRetry) {
+        // Session closed immediately (process already dead).  Retry once.
+        conversations.delete(convId);
+        createFreeCodeSession(systemPrompt)
+          .then(fresh => {
+            conversations.set(convId, fresh);
+            connectAndStream(fresh, true);
+          })
+          .catch(() => {
+            sseWrite(res, 'done', {});
+            finish();
+          });
+      } else {
+        sseWrite(res, 'done', {});
+        finish();
+      }
+    });
+  }
+
+  connectAndStream(convState, false);
 });
 
 /* ------------------------------------------------------------------ */
