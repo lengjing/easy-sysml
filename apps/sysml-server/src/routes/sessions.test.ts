@@ -314,7 +314,7 @@ describe('sessions routes', () => {
       const spyServer = createHttpServer(async (req, res) => {
         if (req.method === 'POST' && req.url === '/sessions') {
           let data = '';
-          req.on('data', c => { data += c; });
+          req.on('data', chunk => { data += chunk; });
           req.on('end', () => {
             capturedBody = JSON.parse(data) as Record<string, unknown>;
             res.writeHead(201, { 'Content-Type': 'application/json' });
@@ -355,7 +355,7 @@ describe('sessions routes', () => {
         expect(capturedBody.system_prompt).toBe('You are a SysML assistant');
         expect(capturedBody.max_turns).toBe(5);
       } finally {
-        await new Promise<void>(r => { spyServer.close(() => r()); });
+        await new Promise<void>(resolve => { spyServer.close(() => resolve()); });
       }
     });
   });
@@ -524,7 +524,7 @@ describe('sessions routes', () => {
 
         expect(deletedSessionId).toBe('fc-to-delete');
       } finally {
-        await new Promise<void>(r => { mockServer.close(() => r()); });
+        await new Promise<void>(resolve => { mockServer.close(() => resolve()); });
       }
     });
 
