@@ -62,7 +62,8 @@ interface StoredSession {
   /** Derived from the first user message */
   title: string;
   messages: ChatMessage[];
-  /** sysml-server conversationId (no longer relevant since we create fresh sessions each turn) */
+  /** sysml-server conversation label; kept in sync so the server can log turns
+   *  against a stable ID even though a fresh free-code session is created per turn */
   conversationId: string | null;
   createdAt: number;
 }
@@ -189,6 +190,10 @@ function getBasename(filePath: string): string {
 const THINKING_DURATION_ESTIMATE_RATIO = 0.3;
 /** Cap on estimated thinking duration in ms */
 const MAX_THINKING_DURATION_MS = 10_000;
+/** Maximum characters used for the session title derived from the first user message */
+const MAX_TITLE_LENGTH = 40;
+/** Maximum number of sessions to persist in localStorage */
+const MAX_STORED_SESSIONS = 50;
 
 let _nextId = 0;
 function makeId(): string {
@@ -221,7 +226,7 @@ function loadSessions(): StoredSession[] {
 
 function saveSessions(sessions: StoredSession[]): void {
   try {
-    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.slice(0, 50)));
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.slice(0, MAX_STORED_SESSIONS)));
   } catch {
     // ignore quota errors
   }
@@ -327,7 +332,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     if (messages.length === 0) return;
     const firstUserMsg = messages.find(m => m.role === 'user');
     const title = firstUserMsg
-      ? firstUserMsg.content.slice(0, 40) + (firstUserMsg.content.length > 40 ? '…' : '')
+      ? firstUserMsg.content.slice(0, MAX_TITLE_LENGTH) + (firstUserMsg.content.length > MAX_TITLE_LENGTH ? '…' : '')
       : '新对话';
     setSessions(prev => {
       const exists = prev.find(s => s.id === activeSessionId);
