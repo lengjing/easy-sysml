@@ -391,6 +391,36 @@ describe('Message translation via createOpenAICompatFetch', () => {
     expect(toolMsg?.content).toBe('Tool result text');
   });
 
+  it('emits tool messages before user text when a user message mixes tool_result and text', async () => {
+    const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
+    await adapter('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'claude-sonnet',
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'call_123', name: 'my_tool', input: { input: 'value' } },
+            ],
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Please continue.' },
+              { type: 'tool_result', tool_use_id: 'call_123', content: 'Tool result text' },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const messages = capturedBody?.messages as Array<Record<string, unknown>>;
+    expect(messages.map(message => message.role)).toEqual(['assistant', 'tool', 'user']);
+    expect(messages[1]?.tool_call_id).toBe('call_123');
+    expect(messages[2]?.content).toBe('Please continue.');
+  });
+
   it('handles array system prompt', async () => {
     const adapter = createOpenAICompatFetch('https://api.example.com/v1', 'sk-test');
     await adapter('https://api.anthropic.com/v1/messages', {

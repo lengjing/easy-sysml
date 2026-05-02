@@ -159,7 +159,8 @@ function translateMessages(
       }
       out.push(assistantMsg)
     } else if (msg.role === 'user') {
-      // User messages may contain text and tool_result blocks
+      // Tool results must immediately follow the assistant tool_calls message.
+      // Emit them before any plain user text from the same Anthropic message.
       const textBlocks: string[] = []
       const toolResultMsgs: Array<Record<string, unknown>> = []
 
@@ -197,11 +198,11 @@ function translateMessages(
         }
       }
 
-      if (textBlocks.length > 0) {
-        out.push({ role: 'user', content: textBlocks.join('\n') })
-      }
       for (const tr of toolResultMsgs) {
         out.push(tr)
+      }
+      if (textBlocks.length > 0) {
+        out.push({ role: 'user', content: textBlocks.join('\n') })
       }
     }
   }
