@@ -3,4 +3,4 @@ dist/
 out/
 *.tsbuildinfo
 .DS_Store
-.env
+.envnohup.out
