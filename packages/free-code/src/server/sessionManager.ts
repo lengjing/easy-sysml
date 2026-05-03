@@ -16,6 +16,9 @@ import type { SessionInfo, SessionState } from './types.js'
  * internal `SessionInfo` type (from `./types.js`) which tracks in-memory
  * runtime session state (process handles, sockets, etc.).
  */
+/** Milliseconds to wait for the subprocess's `system/init` line before falling back to a random UUID. */
+const SESSION_ID_EXTRACTION_TIMEOUT_MS = 5_000
+
 export type { ListedSessionInfo }
 
 type SpawnedProcess = ChildProcess & {
@@ -230,6 +233,8 @@ export class SessionManager {
             finish(msg.session_id)
             return
           }
+          // JSON parsed successfully but no valid session_id field —
+          // fall through to the randomUUID() fallback below.
         } catch {
           // Non-JSON first line — fall through to random UUID.
         }
@@ -240,7 +245,7 @@ export class SessionManager {
 
       // 5-second safety timeout. Real Claude init messages arrive almost
       // instantly; this guards against stalled or non-conformant backends.
-      const timer = setTimeout(() => finish(randomUUID()), 5_000)
+      const timer = setTimeout(() => finish(randomUUID()), SESSION_ID_EXTRACTION_TIMEOUT_MS)
 
       proc.stdout?.on('data', onData)
       proc.once('close', onClose)
