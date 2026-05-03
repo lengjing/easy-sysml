@@ -77,7 +77,7 @@ export async function startServer(
     }
 
     if (method === 'GET' && url === '/sessions') {
-      return jsonResponse(res, 200, sessions.list())
+      return jsonResponse(res, 200, await sessions.list())
     }
 
     if (method === 'POST' && url === '/sessions') {

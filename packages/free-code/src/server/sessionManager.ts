@@ -3,7 +3,20 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import type { WebSocket } from 'ws'
+import {
+  listSessionsImpl,
+  type ListSessionsOptions,
+  type SessionInfo as ListedSessionInfo,
+} from '../utils/listSessionsImpl.js'
 import type { SessionInfo, SessionState } from './types.js'
+
+/**
+ * Session metadata returned by {@link SessionManager.list}, sourced from the
+ * Claude filesystem storage (`~/.claude/projects/`). This is distinct from the
+ * internal `SessionInfo` type (from `./types.js`) which tracks in-memory
+ * runtime session state (process handles, sockets, etc.).
+ */
+export type { ListedSessionInfo }
 
 type SpawnedProcess = ChildProcess & {
   stderr: NodeJS.ReadableStream | null
@@ -104,15 +117,8 @@ export class SessionManager {
     return this.sessions.get(id)
   }
 
-  list(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map(session => ({
-      id: session.id,
-      status: session.status,
-      createdAt: session.createdAt,
-      workDir: session.workDir,
-      process: null,
-      sessionKey: session.sessionKey,
-    }))
+  async list(opts?: ListSessionsOptions): Promise<ListedSessionInfo[]> {
+    return listSessionsImpl(opts)
   }
 
   attachSocket(id: string, socket: WebSocket): ServerSession | undefined {
