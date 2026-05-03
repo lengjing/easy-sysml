@@ -92,7 +92,7 @@ export async function startServer(
       }
 
       try {
-        const session = sessions.create({
+        const session = await sessions.create({
           allowedTools: Array.isArray(body.allowed_tools)
             ? (body.allowed_tools as string[])
             : undefined,

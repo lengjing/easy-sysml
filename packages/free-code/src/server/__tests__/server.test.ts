@@ -15,7 +15,8 @@ class TestBackend implements SessionBackend {
     lastCreateSessionOptions = options
     const script = [
       "const readline = require('node:readline');",
-      "console.log(JSON.stringify({ type: 'system', subtype: 'ready' }));",
+      "const { randomUUID } = require('node:crypto');",
+      "console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: randomUUID() }));",
       "const rl = readline.createInterface({ input: process.stdin });",
       "rl.on('line', line => console.log(line));",
       'setInterval(() => {}, 1000);',
@@ -36,8 +37,9 @@ class StreamingBackend implements SessionBackend {
       "const fs = require('node:fs');",
       "const path = require('node:path');",
       "const readline = require('node:readline');",
+      "const { randomUUID } = require('node:crypto');",
       "const rl = readline.createInterface({ input: process.stdin });",
-      "console.log(JSON.stringify({ type: 'system', subtype: 'ready' }));",
+      "console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: randomUUID() }));",
       'rl.on(\'line\', line => {',
       '  const payload = JSON.parse(line);',
       '  if (payload.type !== \"user\") return;',
