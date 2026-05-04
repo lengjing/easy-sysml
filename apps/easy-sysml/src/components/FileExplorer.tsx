@@ -1,8 +1,10 @@
 /**
- * FileExplorer — file tree with CRUD operations.
+ * FileExplorer — VS Code-style file tree with CRUD + drag & drop.
  *
  * Renders a recursive tree of the virtual file system. Supports:
- * - Click to open a file in the editor
+ * - Single click to preview a file (shown in editor, not pinned to tab)
+ * - Double click to open/pin a file as a persistent tab
+ * - Drag & drop to move files and folders
  * - Context menu for new file / new folder / rename / delete
  * - Inline rename editing
  */
@@ -16,7 +18,6 @@ import {
   Pencil,
   Trash2,
   ChevronRight,
-  MoreHorizontal,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -29,12 +30,15 @@ import type { FileNode } from '../lib/virtual-fs';
 interface FileExplorerProps {
   nodes: FileNode[];
   activeFileId: string | null;
+  previewFileId?: string | null;
   getChildren: (parentId: string | null) => FileNode[];
   onOpenFile: (fileId: string) => void;
+  onPreviewFile?: (fileId: string) => void;
   onCreateFile: (name: string, parentId: string | null) => void;
   onCreateDirectory: (name: string, parentId: string | null) => void;
   onRename: (id: string, newName: string) => void;
   onDelete: (id: string) => void;
+  onMoveNode?: (id: string, newParentId: string | null) => void;
 }
 
 interface ContextMenuState {
@@ -97,9 +101,12 @@ function InlineNameEditor({
 function FileTreeNode({
   node,
   activeFileId,
+  previewFileId,
   getChildren,
   onOpenFile,
+  onPreviewFile,
   onContextMenu,
+  onMoveNode,
   renamingId,
   onRenameConfirm,
   onRenameCancel,
@@ -107,26 +114,78 @@ function FileTreeNode({
 }: {
   node: FileNode;
   activeFileId: string | null;
+  previewFileId?: string | null;
   getChildren: (parentId: string | null) => FileNode[];
   onOpenFile: (fileId: string) => void;
+  onPreviewFile?: (fileId: string) => void;
   onContextMenu: (e: React.MouseEvent, node: FileNode) => void;
+  onMoveNode?: (id: string, newParentId: string | null) => void;
   renamingId: string | null;
   onRenameConfirm: (id: string, name: string) => void;
   onRenameCancel: () => void;
   depth?: number;
 }) {
   const [isOpen, setIsOpen] = useState(true);
+  const [isDragOver, setIsDragOver] = useState(false);
   const isDir = node.type === 'directory';
   const isActive = node.id === activeFileId;
+  const isPreview = !isActive && node.id === previewFileId;
   const isRenaming = node.id === renamingId;
   const children = isDir ? getChildren(node.id) : [];
 
-  const handleClick = () => {
+  /* -- Click handlers -- */
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (isDir) {
-      setIsOpen(!isOpen);
+      setIsOpen(o => !o);
+    } else if (onPreviewFile) {
+      onPreviewFile(node.id);
     } else {
       onOpenFile(node.id);
     }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isDir) {
+      onOpenFile(node.id);
+    }
+  };
+
+  /* -- Drag & drop handlers -- */
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('text/plain', node.id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.stopPropagation();
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isDir) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (!isDir) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const draggedId = e.dataTransfer.getData('text/plain');
+    if (!draggedId || draggedId === node.id) return;
+    // Prevent dropping a folder into one of its own descendants (circular hierarchy)
+    const isDescendant = (ancestorId: string, targetId: string): boolean =>
+      getChildren(ancestorId).some(
+        child => child.id === targetId || isDescendant(child.id, targetId),
+      );
+    if (isDescendant(draggedId, node.id)) return;
+    onMoveNode?.(draggedId, node.id);
   };
 
   const Icon = isDir ? (isOpen ? FolderOpen : Folder) : FileCode;
@@ -135,14 +194,23 @@ function FileTreeNode({
   return (
     <div>
       <div
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={isDir ? handleDragOver : undefined}
+        onDragLeave={isDir ? handleDragLeave : undefined}
+        onDrop={isDir ? handleDrop : undefined}
         className={cn(
           'flex items-center gap-1.5 py-1 px-1.5 rounded cursor-pointer transition-all group text-[11px]',
           isActive
             ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+            : isPreview
+            ? 'bg-blue-500/8 text-[var(--text-main)]'
             : 'text-[var(--text-muted)] hover:bg-[var(--border-color)] hover:text-[var(--text-main)]',
+          isDragOver && 'bg-blue-500/15 border border-blue-500/30',
         )}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={(e) => onContextMenu(e, node)}
       >
         {isDir ? (
@@ -160,7 +228,7 @@ function FileTreeNode({
             onCancel={onRenameCancel}
           />
         ) : (
-          <span className="truncate flex-1">{node.name}</span>
+          <span className={cn('truncate flex-1', isPreview && !isActive && 'italic')}>{node.name}</span>
         )}
       </div>
       {isDir && isOpen && children.length > 0 && (
@@ -170,9 +238,12 @@ function FileTreeNode({
               key={child.id}
               node={child}
               activeFileId={activeFileId}
+              previewFileId={previewFileId}
               getChildren={getChildren}
               onOpenFile={onOpenFile}
+              onPreviewFile={onPreviewFile}
               onContextMenu={onContextMenu}
+              onMoveNode={onMoveNode}
               renamingId={renamingId}
               onRenameConfirm={onRenameConfirm}
               onRenameCancel={onRenameCancel}
@@ -277,16 +348,20 @@ interface PendingNode {
 export const FileExplorer: React.FC<FileExplorerProps> = ({
   nodes,
   activeFileId,
+  previewFileId,
   getChildren,
   onOpenFile,
+  onPreviewFile,
   onCreateFile,
   onCreateDirectory,
   onRename,
   onDelete,
+  onMoveNode,
 }) => {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingNode | null>(null);
+  const [rootDragOver, setRootDragOver] = useState(false);
 
   const rootChildren = getChildren(null);
 
@@ -337,6 +412,24 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
     setRenamingId(null);
   };
 
+  /* -- Root-level drop (move to project root) -- */
+  const handleRootDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setRootDragOver(true);
+  };
+
+  const handleRootDragLeave = () => setRootDragOver(false);
+
+  const handleRootDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setRootDragOver(false);
+    const draggedId = e.dataTransfer.getData('text/plain');
+    if (draggedId) {
+      onMoveNode?.(draggedId, null);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full" onContextMenu={handleBgContextMenu}>
       {/* Header */}
@@ -363,15 +456,26 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
       </div>
 
       {/* Tree */}
-      <div className="flex-1 overflow-y-auto p-1.5 custom-scrollbar">
+      <div
+        className={cn(
+          'flex-1 overflow-y-auto p-1.5 custom-scrollbar',
+          rootDragOver && 'bg-blue-500/5',
+        )}
+        onDragOver={handleRootDragOver}
+        onDragLeave={handleRootDragLeave}
+        onDrop={handleRootDrop}
+      >
         {rootChildren.map((node) => (
           <FileTreeNode
             key={node.id}
             node={node}
             activeFileId={activeFileId}
+            previewFileId={previewFileId}
             getChildren={getChildren}
             onOpenFile={onOpenFile}
+            onPreviewFile={onPreviewFile}
             onContextMenu={handleContextMenu}
+            onMoveNode={onMoveNode}
             renamingId={renamingId}
             onRenameConfirm={handleRenameConfirm}
             onRenameCancel={() => setRenamingId(null)}

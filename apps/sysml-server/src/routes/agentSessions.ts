@@ -1,5 +1,5 @@
 /**
- * Sessions Routes
+ * Agent Sessions Routes
  *
  * Manages free-code agent sessions linked to projects.
  * Nested under /api/projects/:projectId/sessions
@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db.js';
 import { ensureStoredProjectWorkDir } from '../projectStorage.js';
 
-export const sessionsRouter = Router({ mergeParams: true });
+export const agentSessionsRouter = Router({ mergeParams: true });
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -67,7 +67,7 @@ function resolveWorkDir(defaultDir: string, cwd: string | undefined): string {
 /*  GET /api/projects/:projectId/sessions                              */
 /* ------------------------------------------------------------------ */
 
-sessionsRouter.get('/', (req: Request, res: Response) => {
+agentSessionsRouter.get('/', (req: Request, res: Response) => {
   const db = getDb();
   const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.projectId);
   if (!project) {
@@ -76,7 +76,7 @@ sessionsRouter.get('/', (req: Request, res: Response) => {
   }
 
   const sessions = db
-    .prepare('SELECT * FROM sessions WHERE project_id = ? ORDER BY created_at DESC')
+    .prepare('SELECT * FROM agent_sessions WHERE project_id = ? ORDER BY created_at DESC')
     .all(req.params.projectId);
   res.json(sessions);
 });
@@ -85,7 +85,7 @@ sessionsRouter.get('/', (req: Request, res: Response) => {
 /*  POST /api/projects/:projectId/sessions                             */
 /* ------------------------------------------------------------------ */
 
-sessionsRouter.post('/', async (req: Request, res: Response) => {
+agentSessionsRouter.post('/', async (req: Request, res: Response) => {
   const db = getDb();
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId) as
     | { id: string; name: string; work_dir?: string }
@@ -156,11 +156,11 @@ sessionsRouter.post('/', async (req: Request, res: Response) => {
   const id = uuidv4();
 
   db.prepare(
-    `INSERT INTO sessions (id, project_id, free_code_session_id, free_code_ws_url, work_dir, status, created_at, updated_at)
+    `INSERT INTO agent_sessions (id, project_id, free_code_session_id, free_code_ws_url, work_dir, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
   ).run(id, req.params.projectId, freeCodeSessionId ?? null, freeCodeWsUrl ?? null, workDir, now, now);
 
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id);
+  const session = db.prepare('SELECT * FROM agent_sessions WHERE id = ?').get(id);
   res.status(201).json(session);
 });
 
@@ -168,10 +168,10 @@ sessionsRouter.post('/', async (req: Request, res: Response) => {
 /*  GET /api/projects/:projectId/sessions/:sessionId                   */
 /* ------------------------------------------------------------------ */
 
-sessionsRouter.get('/:sessionId', (req: Request, res: Response) => {
+agentSessionsRouter.get('/:sessionId', (req: Request, res: Response) => {
   const db = getDb();
   const session = db
-    .prepare('SELECT * FROM sessions WHERE id = ? AND project_id = ?')
+    .prepare('SELECT * FROM agent_sessions WHERE id = ? AND project_id = ?')
     .get(req.params.sessionId, req.params.projectId);
   if (!session) {
     res.status(404).json({ error: 'Session not found' });
@@ -184,10 +184,10 @@ sessionsRouter.get('/:sessionId', (req: Request, res: Response) => {
 /*  DELETE /api/projects/:projectId/sessions/:sessionId                */
 /* ------------------------------------------------------------------ */
 
-sessionsRouter.delete('/:sessionId', async (req: Request, res: Response) => {
+agentSessionsRouter.delete('/:sessionId', async (req: Request, res: Response) => {
   const db = getDb();
   const session = db
-    .prepare('SELECT * FROM sessions WHERE id = ? AND project_id = ?')
+    .prepare('SELECT * FROM agent_sessions WHERE id = ? AND project_id = ?')
     .get(req.params.sessionId, req.params.projectId) as
     | { id: string; free_code_session_id: string | null }
     | undefined;
@@ -209,7 +209,7 @@ sessionsRouter.delete('/:sessionId', async (req: Request, res: Response) => {
     }
   }
 
-  db.prepare('UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?').run(
+  db.prepare('UPDATE agent_sessions SET status = ?, updated_at = ? WHERE id = ?').run(
     'closed',
     Date.now(),
     session.id,

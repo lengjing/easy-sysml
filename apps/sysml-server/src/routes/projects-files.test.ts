@@ -121,11 +121,13 @@ describe('projects and files routes', () => {
       }),
     });
     expect(createFileResponse.status).toBe(201);
-    const file = await createFileResponse.json() as { id: string; path: string; content: string };
+    const file = await createFileResponse.json() as { id: string; path: string; content: string; type: string };
     expect(file.path).toBe('models/main.sysml');
+    expect(file.type).toBe('file');
     expect(readFileSync(join(projectRecord.work_dir, 'models', 'main.sysml'), 'utf8')).toBe('package Vehicle {}');
 
-      const updateFileResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files/${file.id}`, {
+    // Rename + update content via PUT — the ID changes because it's path-derived
+    const updateFileResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files/${file.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -136,6 +138,7 @@ describe('projects and files routes', () => {
     });
     expect(updateFileResponse.status).toBe(200);
     const updatedFile = await updateFileResponse.json() as {
+      id: string;
       name: string;
       path: string;
       content: string;
@@ -143,20 +146,60 @@ describe('projects and files routes', () => {
     expect(updatedFile.name).toBe('vehicle.sysml');
     expect(updatedFile.path).toBe('architecture/vehicle.sysml');
     expect(updatedFile.content).toContain('VehicleArchitecture');
+    // ID is now based on the new path
+    expect(updatedFile.id).not.toBe(file.id);
     expect(readFileSync(join(projectRecord.work_dir, 'architecture', 'vehicle.sysml'), 'utf8')).toContain('VehicleArchitecture');
 
-      const listFilesResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files`);
+    // Listing returns nodes from the filesystem — use the updated ID
+    const listFilesResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files`);
     expect(listFilesResponse.status).toBe(200);
-    const files = await listFilesResponse.json() as Array<{ id: string; path: string }>;
-    expect(files).toEqual([
-      expect.objectContaining({ id: file.id, path: 'architecture/vehicle.sysml' }),
-    ]);
+    const nodes = await listFilesResponse.json() as Array<{ id: string; path: string; type: string }>;
+    const fileNode = nodes.find(n => n.type === 'file' && n.path === 'architecture/vehicle.sysml');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.id).toBe(updatedFile.id);
 
-      const deleteFileResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files/${file.id}`, {
+    // Delete using the updated ID
+    const deleteFileResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files/${updatedFile.id}`, {
       method: 'DELETE',
     });
     expect(deleteFileResponse.status).toBe(200);
     expect(existsSync(join(projectRecord.work_dir, 'architecture', 'vehicle.sysml'))).toBe(false);
+  });
+
+  it('creates and deletes a directory', async () => {
+    const baseUrl = server!.baseUrl;
+
+    const projectResponse = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Dir Test Project' }),
+    });
+    const project = await projectResponse.json() as { id: string };
+    const projectRecord = await (await fetch(`${baseUrl}/api/projects/${project.id}`)).json() as { work_dir: string };
+
+    // Create a directory
+    const createDirResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'subsystems', path: 'subsystems', type: 'directory' }),
+    });
+    expect(createDirResponse.status).toBe(201);
+    const dir = await createDirResponse.json() as { id: string; type: string; path: string };
+    expect(dir.type).toBe('directory');
+    expect(dir.path).toBe('subsystems');
+    expect(existsSync(join(projectRecord.work_dir, 'subsystems'))).toBe(true);
+
+    // Directory appears in listing
+    const listResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files`);
+    const nodes = await listResponse.json() as Array<{ type: string; path: string }>;
+    expect(nodes.some(n => n.type === 'directory' && n.path === 'subsystems')).toBe(true);
+
+    // Delete the directory
+    const deleteDirResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files/${dir.id}`, {
+      method: 'DELETE',
+    });
+    expect(deleteDirResponse.status).toBe(200);
+    expect(existsSync(join(projectRecord.work_dir, 'subsystems'))).toBe(false);
   });
 
   it('rejects invalid or conflicting file paths', async () => {

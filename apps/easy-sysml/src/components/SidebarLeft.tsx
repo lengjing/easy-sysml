@@ -27,8 +27,10 @@ interface SidebarLeftProps {
   activeFileId?: string | null;
   /** Get children of a file node. */
   getChildren?: (parentId: string | null) => FileNode[];
-  /** Open a file in the editor. */
+  /** Open a file in the editor (double-click / pin). */
   onOpenFile?: (fileId: string) => void;
+  /** Preview a file (single-click, not pinned). */
+  onPreviewFile?: (fileId: string) => void;
   /** Create a new file. */
   onCreateFile?: (name: string, parentId: string | null) => void;
   /** Create a new directory. */
@@ -37,6 +39,10 @@ interface SidebarLeftProps {
   onRenameNode?: (id: string, newName: string) => void;
   /** Delete a node. */
   onDeleteNode?: (id: string) => void;
+  /** Move a node to a new parent (drag & drop). */
+  onMoveNode?: (id: string, newParentId: string | null) => void;
+  /** Preview file id (shown in editor but not pinned to tabs). */
+  previewFileId?: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,12 +178,15 @@ export const SidebarLeft = ({
   domainModel,
   fsNodes,
   activeFileId,
+  previewFileId,
   getChildren: getFileChildren,
   onOpenFile,
+  onPreviewFile,
   onCreateFile,
   onCreateDirectory,
   onRenameNode,
   onDeleteNode,
+  onMoveNode,
 }: SidebarLeftProps) => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   /** Toggle between 'model' and 'files' sidebar view. */
@@ -362,12 +371,15 @@ export const SidebarLeft = ({
         <FileExplorer
           nodes={fsNodes}
           activeFileId={activeFileId ?? null}
+          previewFileId={previewFileId}
           getChildren={getFileChildren}
           onOpenFile={onOpenFile}
+          onPreviewFile={onPreviewFile}
           onCreateFile={onCreateFile}
           onCreateDirectory={onCreateDirectory}
           onRename={onRenameNode}
           onDelete={onDeleteNode}
+          onMoveNode={onMoveNode}
         />
       ) : (
         <>

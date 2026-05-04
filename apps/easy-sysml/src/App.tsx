@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ReactFlowProvider } from 'reactflow';
-import { AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Box } from 'lucide-react';
 
 import { cn } from './lib/utils';
@@ -71,6 +71,9 @@ function WorkbenchContent() {
     activeFileId,
     activeFileContent,
     activeFile,
+    previewFileId,
+    previewFile,
+    closePreview,
     openFile,
     closeTab,
     setActiveFile,
@@ -92,8 +95,12 @@ function WorkbenchContent() {
   const setKermlCode = useCallback((code: string) => {
     if (activeFileId) {
       updateFileContent(activeFileId, code);
+      // Auto-pin if this file was only being previewed
+      if (previewFileId === activeFileId) {
+        openFile(activeFileId);
+      }
     }
-  }, [activeFileId, updateFileContent]);
+  }, [activeFileId, updateFileContent, previewFileId, openFile]);
 
   // Get current file URI for LSP
   const currentFileUri = activeFileId ? getUri(activeFileId) : undefined;
@@ -209,6 +216,10 @@ function WorkbenchContent() {
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
         projectBusy={projectBusy}
+        showCode={showCode}
+        setShowCode={setShowCode}
+        showAI={showAI}
+        setShowAI={setShowAI}
       />
 
       <main className="flex flex-1 overflow-hidden relative">
@@ -225,12 +236,15 @@ function WorkbenchContent() {
               domainModel={domainModel}
               fsNodes={fsNodes}
               activeFileId={activeFileId}
+              previewFileId={previewFileId}
               getChildren={getChildren}
               onOpenFile={(fileId) => { openFile(fileId); setShowCode(true); }}
+              onPreviewFile={(fileId) => { previewFile(fileId); setShowCode(true); }}
               onCreateFile={(name, parentId) => { createFile(name, parentId); setShowCode(true); }}
               onCreateDirectory={createDirectory}
               onRenameNode={renameNode}
               onDeleteNode={deleteNode}
+              onMoveNode={moveNode}
             />
           )}
         </AnimatePresence>
@@ -241,10 +255,6 @@ function WorkbenchContent() {
             setLeftPanelVisible={setLeftPanelVisible}
             rightPanelVisible={rightPanelVisible}
             setRightPanelVisible={setRightPanelVisible}
-            showCode={showCode}
-            setShowCode={setShowCode}
-            showAI={showAI}
-            setShowAI={setShowAI}
           />
 
           <div className="flex-1 relative flex overflow-hidden">
@@ -253,7 +263,7 @@ function WorkbenchContent() {
                 {/* Canvas — takes remaining space */}
                 <div className={cn(
                   'relative transition-all duration-300',
-                  showCode && showAI ? 'w-1/3' : showCode || showAI ? 'w-1/2' : 'w-full',
+                  showCode ? 'w-1/2' : 'w-full',
                 )}>
                   <DiagramCanvas ref={canvasRef} onStructureChange={handleStructureChange} />
                 </div>
@@ -263,25 +273,17 @@ function WorkbenchContent() {
                   code={kermlCode}
                   setCode={setKermlCode}
                   onDocumentSymbols={handleDocumentSymbols}
-                  visible={showCode}
+                  visible={showCode && (openTabs.length > 0 || previewFileId !== null)}
                   openTabs={openTabs}
                   activeFileId={activeFileId}
                   onSelectTab={(fileId) => setActiveFile(fileId)}
                   onCloseTab={closeTab}
                   getFileName={getFileName}
                   fileUri={currentFileUri}
+                  previewFileId={previewFileId}
+                  onSelectPreview={() => previewFileId && setActiveFile(previewFileId)}
+                  onClosePreview={closePreview}
                 />
-
-                {/* AI Chat Panel */}
-                {showAI && (
-                  <div className="w-[420px] border-l border-[var(--border-color)] flex-shrink-0">
-                    <AIChatPanel
-                      onApplyCode={handleApplyAICode}
-                      currentCode={kermlCode}
-                      projectId={currentProjectId}
-                    />
-                  </div>
-                )}
               </>
             ) : activeTab === 'traceability' ? (
               <TraceabilityMatrix />
@@ -303,6 +305,25 @@ function WorkbenchContent() {
 
         <AnimatePresence initial={false}>
           {rightPanelVisible && <SidebarRight visible={rightPanelVisible} />}
+        </AnimatePresence>
+
+        {/* AI Chat Panel — fixed right sidebar, always mounted once opened */}
+        <AnimatePresence initial={false}>
+          {showAI && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 420, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="border-l border-[var(--border-color)] flex-shrink-0 overflow-hidden"
+            >
+              <AIChatPanel
+                onApplyCode={handleApplyAICode}
+                currentCode={kermlCode}
+                projectId={currentProjectId}
+              />
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
     </div>

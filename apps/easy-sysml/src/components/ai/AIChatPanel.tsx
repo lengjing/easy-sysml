@@ -6,10 +6,11 @@
  * - Auto-applies SysML code to editor when the agent writes a .sysml file
  * - Shows action history inline: "Thought for X.X seconds", "Read file", "Edited file", etc.
  * - Supports slash commands: /code, /help, /clear
- * - Maintains multiple named sessions with localStorage persistence
+ * - Maintains multiple named sessions backed by the sysml-server backend
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Sparkles, Plus, Loader2,
   AlertCircle, Brain, Terminal,
@@ -17,56 +18,19 @@ import {
   XCircle, FileText, FilePen, Search, FolderOpen,
   Globe, Square, Clock, ChevronDown, ChevronRight,
   StopCircle, Zap, Play, ArrowUp, History, MessageSquarePlus,
+  Key, CheckCircle2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import {
+  useChatSessions,
+  type ChatMessage,
+  type ThinkingStep,
+  type ToolCall,
+} from '../../hooks/useChatSessions';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
-
-interface ThinkingStep {
-  content: string;
-  timestamp: number;
-}
-
-interface ToolCall {
-  /** free-code tool_use id — used for matching running → completed */
-  id?: string;
-  name: string;
-  /** Parsed input args from the agent */
-  input?: Record<string, unknown>;
-  status: 'running' | 'completed' | 'error';
-  result?: string;
-  timestamp: number;
-}
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'error' | 'system';
-  content: string;
-  provider?: string;
-  thinkingSteps: ThinkingStep[];
-  toolCalls: ToolCall[];
-  /** Number of SysML code blocks auto-synced to editor */
-  codesSynced: number;
-  /** Duration from free-code result message */
-  durationMs?: number;
-  /** How long the model spent thinking (ms) before first tool/response */
-  thinkingDurationMs?: number;
-  timestamp: number;
-}
-
-/** A chat session — stored in localStorage for persistence across page reloads */
-interface StoredSession {
-  id: string;
-  /** Derived from the first user message */
-  title: string;
-  messages: ChatMessage[];
-  /** sysml-server conversation label; kept in sync so the server can log turns
-   *  against a stable ID even though a fresh free-code session is created per turn */
-  conversationId: string | null;
-  createdAt: number;
-}
 
 interface AIChatPanelProps {
   onApplyCode: (code: string) => void;
@@ -192,20 +156,11 @@ function getBasename(filePath: string): string {
 const THINKING_DURATION_ESTIMATE_RATIO = 0.3;
 /** Cap on estimated thinking duration in ms */
 const MAX_THINKING_DURATION_MS = 10_000;
-/** Maximum characters used for the session title derived from the first user message */
-const MAX_TITLE_LENGTH = 40;
-/** Maximum number of sessions to persist in localStorage */
-const MAX_STORED_SESSIONS = 50;
 const AI_API_KEY_STORAGE_KEY = 'easy-sysml-ai-api-key';
 
 let _nextId = 0;
 function makeId(): string {
   return `msg-${Date.now()}-${_nextId++}`;
-}
-
-let _nextSessionId = 0;
-function makeSessionId(): string {
-  return `sess-${Date.now()}-${_nextSessionId++}`;
 }
 
 function formatRelativeTime(ts: number): string {
@@ -217,44 +172,16 @@ function formatRelativeTime(ts: number): string {
 }
 
 function formatDurationLabel(durationMs: number | undefined): string {
-  if (durationMs === undefined) {
-    return '0.0 秒';
-  }
-
+  if (durationMs === undefined) return '0.0 秒';
   return `${(durationMs / 1000).toFixed(1)} 秒`;
 }
 
 function getStepDurationMs(steps: ThinkingStep[]): number | undefined {
-  if (steps.length === 0) {
-    return undefined;
-  }
-
+  if (steps.length === 0) return undefined;
   const firstTimestamp = steps[0]?.timestamp;
   const lastTimestamp = steps[steps.length - 1]?.timestamp;
-  if (firstTimestamp === undefined || lastTimestamp === undefined) {
-    return undefined;
-  }
-
+  if (firstTimestamp === undefined || lastTimestamp === undefined) return undefined;
   return Math.max(100, lastTimestamp - firstTimestamp);
-}
-
-const SESSIONS_STORAGE_KEY = 'ai-chat-sessions-v1';
-
-function loadSessions(): StoredSession[] {
-  try {
-    const raw = localStorage.getItem(SESSIONS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as StoredSession[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSessions(sessions: StoredSession[]): void {
-  try {
-    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.slice(0, MAX_STORED_SESSIONS)));
-  } catch {
-    // ignore quota errors
-  }
 }
 
 function loadStoredApiKey(): string {
@@ -333,6 +260,26 @@ const markdownComponents = {
   blockquote: ({ children, ...props }: React.HTMLAttributes<HTMLQuoteElement>) => (
     <blockquote className="border-l-2 border-purple-500/30 pl-3 my-1.5 text-[var(--text-muted)]" {...props}>{children}</blockquote>
   ),
+  table: ({ children, ...props }: React.HTMLAttributes<HTMLTableElement>) => (
+    <div className="my-2 overflow-x-auto rounded-lg border border-[var(--border-color)]">
+      <table className="min-w-full text-[12px] border-collapse" {...props}>{children}</table>
+    </div>
+  ),
+  thead: ({ children, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) => (
+    <thead className="bg-[var(--bg-main)]/80" {...props}>{children}</thead>
+  ),
+  tbody: ({ children, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) => (
+    <tbody {...props}>{children}</tbody>
+  ),
+  tr: ({ children, ...props }: React.HTMLAttributes<HTMLTableRowElement>) => (
+    <tr className="border-b border-[var(--border-color)] last:border-b-0" {...props}>{children}</tr>
+  ),
+  th: ({ children, ...props }: React.HTMLAttributes<HTMLTableCellElement>) => (
+    <th className="px-3 py-1.5 text-left font-semibold text-[var(--text-main)] border-r border-[var(--border-color)] last:border-r-0" {...props}>{children}</th>
+  ),
+  td: ({ children, ...props }: React.HTMLAttributes<HTMLTableCellElement>) => (
+    <td className="px-3 py-1.5 text-[var(--text-main)] border-r border-[var(--border-color)] last:border-r-0" {...props}>{children}</td>
+  ),
 };
 
 /* ------------------------------------------------------------------ */
@@ -344,7 +291,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   currentCode,
   projectId,
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const chatSessions = useChatSessions(projectId);
+
+  // Ref that always points to the latest chatSessions object.
+  // Used inside handleSend (async) to avoid stale closures.
+  const chatSessionsRef = useRef(chatSessions);
+  chatSessionsRef.current = chatSessions;
+
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCommands, setShowCommands] = useState(false);
@@ -353,14 +306,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [apiKey, setApiKey] = useState(loadStoredApiKey);
   const [apiKeyDraft, setApiKeyDraft] = useState(loadStoredApiKey);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
-
-  // Conversation state — sent to sysml-server so it can reuse the convId label
-  const [conversationId, setConversationId] = useState<string | null>(null);
-
-  // Sessions management
-  const [sessions, setSessions] = useState<StoredSession[]>(loadSessions);
-  const [activeSessionId, setActiveSessionId] = useState<string>(makeSessionId);
   const [showSessions, setShowSessions] = useState(false);
+  // API key form is auto-shown when no key is configured
+  const [showApiKeyForm, setShowApiKeyForm] = useState(() => !loadStoredApiKey().trim());
 
   // Streaming state
   const [streamingContent, setStreamingContent] = useState('');
@@ -376,24 +324,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  /* ---------- Auto-save current session whenever messages change ---------- */
+  // Keep a snapshot of current messages inside async SSE callbacks
+  // (avoids stale closure issues when building the final message list)
+  const messagesSnapshotRef = useRef<ChatMessage[]>(chatSessions.messages);
   useEffect(() => {
-    if (messages.length === 0) return;
-    const firstUserMsg = messages.find(m => m.role === 'user');
-    const title = firstUserMsg
-      ? firstUserMsg.content.slice(0, MAX_TITLE_LENGTH) + (firstUserMsg.content.length > MAX_TITLE_LENGTH ? '…' : '')
-      : '新对话';
-    setSessions(prev => {
-      const exists = prev.find(s => s.id === activeSessionId);
-      const updated: StoredSession[] = exists
-        ? prev.map(s => s.id === activeSessionId
-            ? { ...s, title, messages, conversationId }
-            : s)
-        : [{ id: activeSessionId, title, messages, conversationId, createdAt: Date.now() }, ...prev];
-      saveSessions(updated);
-      return updated;
-    });
-  }, [messages, conversationId, activeSessionId]);
+    messagesSnapshotRef.current = chatSessions.messages;
+  }, [chatSessions.messages]);
 
   /* ---------- Check backend status on mount ---------- */
   useEffect(() => {
@@ -420,7 +356,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, loading, streamingContent, streamingThinking, streamingToolCalls]);
+  }, [chatSessions.messages, loading, streamingContent, streamingThinking, streamingToolCalls]);
 
   /* ---------- Slash command handling ---------- */
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -439,14 +375,14 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             content: `📎 已附加当前编辑器代码 (${currentCode.split('\n').length} 行) 作为上下文`,
             thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
           };
-          setMessages(prev => [...prev, sysMsg]);
+          chatSessions.setMessages([...chatSessions.messages, sysMsg]);
         } else {
           const sysMsg: ChatMessage = {
             id: makeId(), role: 'system',
             content: '⚠️ 编辑器中没有代码',
             thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
           };
-          setMessages(prev => [...prev, sysMsg]);
+          chatSessions.setMessages([...chatSessions.messages, sysMsg]);
         }
         setInput('');
         break;
@@ -458,17 +394,17 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           content: `📋 可用命令:\n${helpText}`,
           thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
         };
-        setMessages(prev => [...prev, sysMsg]);
+        chatSessions.setMessages([...chatSessions.messages, sysMsg]);
         setInput('');
         break;
       }
       case '/clear':
-        setMessages([]);
-        setConversationId(null);
+        chatSessions.setMessages([]);
+        chatSessions.setConversationId(null);
         setInput('');
         break;
     }
-  }, [currentCode]);
+  }, [currentCode, chatSessions]);
 
   const handleSaveApiKey = useCallback(() => {
     const nextKey = apiKeyDraft.trim();
@@ -476,11 +412,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setApiKeyError('请输入有效的 API key');
       return;
     }
-
     persistApiKey(nextKey);
     setApiKey(nextKey);
     setApiKeyDraft(nextKey);
     setApiKeyError(null);
+    setShowApiKeyForm(false);
   }, [apiKeyDraft]);
 
   const handleClearApiKey = useCallback(() => {
@@ -496,6 +432,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     if (!userText || loading) return;
     if (apiKeyRequired && !apiKey.trim()) {
       setApiKeyError('请先输入 AI API key');
+      setShowApiKeyForm(true);
       return;
     }
 
@@ -515,7 +452,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       id: makeId(), role: 'user', content: userText,
       thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
     };
-    setMessages(prev => [...prev, userMsg]);
+
+    // Snapshot current messages + new user message for this turn
+    const turnStartMessages = [...messagesSnapshotRef.current, userMsg];
+    messagesSnapshotRef.current = turnStartMessages;
+    chatSessionsRef.current.setMessages(turnStartMessages);
+
     setLoading(true);
     setStreamingContent('');
     setStreamingThinking([]);
@@ -532,12 +474,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     let contentAcc = '';
     let codeCount = 0;
     let durationMs: number | undefined;
+    // Track messages accumulated for this turn (errors may be added during streaming)
+    let turnMessages = [...turnStartMessages];
 
     try {
-      const history = messages
+      const history = turnStartMessages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-      history.push({ role: 'user', content: userText });
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -548,7 +491,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         body: JSON.stringify({
           messages: history,
           currentCode: currentCode?.trim() || undefined,
-          conversationId: conversationId || undefined,
+          conversationId: chatSessionsRef.current.conversationId || undefined,
           autoApply: true,
           projectId,
         }),
@@ -587,7 +530,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               switch (currentEvent) {
                 case 'session': {
                   if (data.conversationId) {
-                    setConversationId(data.conversationId);
+                    chatSessionsRef.current.setConversationId(data.conversationId);
                   }
                   break;
                 }
@@ -602,7 +545,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   break;
                 }
                 case 'delta': {
-                  // Mark end of thinking when first content arrives
                   if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
                     thinkingEndTsRef.current = Date.now();
                   }
@@ -619,7 +561,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   break;
                 }
                 case 'tool_call': {
-                  // Mark end of thinking when first tool call arrives
                   if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
                     thinkingEndTsRef.current = Date.now();
                   }
@@ -631,7 +572,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     result: data.result,
                     timestamp: Date.now(),
                   };
-                  // Update existing running entry by ID, or append
                   let existingIdx = -1;
                   if (data.id && data.status !== 'running') {
                     for (let i = toolCallAcc.length - 1; i >= 0; i--) {
@@ -661,7 +601,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
                     codesSynced: codeCount, timestamp: Date.now(),
                   };
-                  setMessages(prev => [...prev, errorMsg]);
+                  turnMessages = [...turnMessages, errorMsg];
+                  chatSessionsRef.current.setMessages(turnMessages);
                   break;
                 }
                 case 'done': {
@@ -679,7 +620,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                       codesSynced: codeCount, durationMs, thinkingDurationMs,
                       timestamp: Date.now(),
                     };
-                    setMessages(prev => [...prev, assistantMsg]);
+                    turnMessages = [...turnMessages, assistantMsg];
+                    chatSessionsRef.current.setMessages(turnMessages);
                   }
                   break;
                 }
@@ -698,7 +640,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         id: makeId(), role: 'error', content: message,
         thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
       };
-      setMessages(prev => [...prev, errorMsg]);
+      turnMessages = [...turnMessages, errorMsg];
+      chatSessionsRef.current.setMessages(turnMessages);
     } finally {
       setLoading(false);
       setStreamingContent('');
@@ -707,55 +650,53 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setStreamingCodeCount(0);
       abortRef.current = null;
     }
-  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, conversationId, currentCode, executeCommand, input, loading, messages, onApplyCode, projectId]);
+  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, currentCode, executeCommand, input, loading, onApplyCode, projectId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); }
   }, [handleSend]);
 
   const handleNewChat = useCallback(() => {
+    // If the current session has no messages, don't create another empty one — 
+    // just close the sessions panel and focus the input instead.
+    const currentMessages = chatSessionsRef.current.messages;
+    if (currentMessages.length === 0 && !loading) {
+      setShowSessions(false);
+      setTimeout(() => inputRef.current?.focus(), 50);
+      return;
+    }
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
-    setMessages([]);
+    chatSessions.newSession();
     setInput('');
-    setConversationId(null);
     setStreamingContent('');
     setStreamingThinking([]);
     setStreamingToolCalls([]);
     setStreamingCodeCount(0);
-    setActiveSessionId(makeSessionId());
     setShowSessions(false);
-  }, []);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [chatSessions, loading]);
 
-  const switchToSession = useCallback((session: StoredSession) => {
+  const switchToSession = useCallback((sessionId: string) => {
     if (loading) return;
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
-    setMessages(session.messages);
-    setConversationId(session.conversationId);
-    setActiveSessionId(session.id);
+    chatSessions.switchSession(sessionId);
     setInput('');
     setStreamingContent('');
     setStreamingThinking([]);
     setStreamingToolCalls([]);
     setStreamingCodeCount(0);
     setShowSessions(false);
-  }, [loading]);
+  }, [loading, chatSessions]);
 
   const deleteSession = useCallback((sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setSessions(prev => {
-      const updated = prev.filter(s => s.id !== sessionId);
-      saveSessions(updated);
-      return updated;
-    });
-    if (sessionId === activeSessionId) {
-      // Start fresh when deleting the active session
-      setMessages([]);
-      setConversationId(null);
-      setActiveSessionId(makeSessionId());
-    }
-  }, [activeSessionId]);
+    chatSessions.deleteSession(sessionId);
+  }, [chatSessions]);
 
   const mdComponents = useMemo(() => markdownComponents, []);
+  const mdRemarkPlugins = useMemo(() => [remarkGfm], []);
+
+  const { messages, sessions, activeSessionId, conversationId } = chatSessions;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                          */
@@ -777,6 +718,23 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* API Key indicator button */}
+          {apiKeyRequired && (
+            <button
+              onClick={() => setShowApiKeyForm(v => !v)}
+              className={cn(
+                'p-1.5 rounded transition-colors',
+                showApiKeyForm
+                  ? 'bg-purple-500/10 text-purple-500'
+                  : hasConfiguredApiKey
+                  ? 'text-emerald-600 dark:text-emerald-400 hover:bg-[var(--border-color)]'
+                  : 'text-amber-500 hover:bg-[var(--border-color)] animate-pulse',
+              )}
+              title={hasConfiguredApiKey ? 'API Key 已配置（点击修改）' : '需要配置 API Key'}
+            >
+              {hasConfiguredApiKey ? <CheckCircle2 size={13} /> : <Key size={13} />}
+            </button>
+          )}
           {/* Sessions toggle */}
           <button
             onClick={() => setShowSessions(v => !v)}
@@ -804,6 +762,58 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         </div>
       </div>
 
+      {/* ── API Key form (collapsible) ── */}
+      {apiKeyRequired && showApiKeyForm && (
+        <div className="border-b border-[var(--border-color)] bg-[var(--bg-main)] flex-shrink-0 px-3 py-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[var(--text-main)]">AI API Key</span>
+            {hasConfiguredApiKey && (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={10} />已配置
+              </span>
+            )}
+          </div>
+          {!hasConfiguredApiKey && (
+            <p className="text-[11px] text-[var(--text-muted)]">
+              请输入分配的 API key，系统会自动附加到每次 AI 请求中。
+            </p>
+          )}
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={apiKeyDraft}
+              onChange={e => setApiKeyDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleSaveApiKey();
+                if (e.key === 'Escape') setShowApiKeyForm(false);
+              }}
+              placeholder="输入或粘贴 API key"
+              className="flex-1 min-w-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-1.5 text-[12px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-purple-500/40"
+            />
+            <button
+              onClick={handleSaveApiKey}
+              className="px-3 py-1.5 rounded-lg bg-purple-500 text-white text-[11px] font-medium hover:bg-purple-600 transition-colors"
+            >
+              保存
+            </button>
+            {hasConfiguredApiKey && (
+              <button
+                onClick={handleClearApiKey}
+                aria-label="清除 API Key"
+                className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:text-red-500 hover:border-red-500/30 transition-colors"
+              >
+                清除
+              </button>
+            )}
+          </div>
+          {apiKeyError && (
+            <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400">
+              {apiKeyError}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Sessions panel ── */}
       {showSessions && (
         <div className="border-b border-[var(--border-color)] bg-[var(--bg-main)] flex-shrink-0 max-h-[55vh] overflow-y-auto custom-scrollbar">
@@ -823,7 +833,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             sessions.map(session => (
               <div
                 key={session.id}
-                onClick={() => switchToSession(session)}
+                onClick={() => switchToSession(session.id)}
                 className={cn(
                   'group flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors border-b border-[var(--border-color)]/50 last:border-b-0',
                   session.id === activeSessionId
@@ -864,51 +874,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         </div>
       )}
 
-      {apiKeyRequired && (
-        <div className="border-b border-[var(--border-color)] bg-[var(--bg-main)] flex-shrink-0">
-          <div className="px-3 py-2.5 space-y-2">
-            <div>
-              <div className="text-[12px] font-semibold text-[var(--text-main)]">AI API Key</div>
-              <div className="text-[11px] text-[var(--text-muted)]">
-                {hasConfiguredApiKey
-                  ? '已配置，将自动附加到 AI 请求。'
-                  : '使用 AI 模块前需要先配置一个已分配的 API key。管理员可在 API Key 管理页创建和吊销 key。'}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKeyDraft}
-                onChange={e => setApiKeyDraft(e.target.value)}
-                placeholder="输入或粘贴 API key"
-                className="flex-1 min-w-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-2 text-[12px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-purple-500/40"
-              />
-              <button
-                onClick={handleSaveApiKey}
-                className="px-3 py-2 rounded-lg bg-purple-500 text-white text-[11px] font-medium hover:bg-purple-600 transition-colors"
-              >
-                保存
-              </button>
-              {hasConfiguredApiKey && (
-                <button
-                  onClick={handleClearApiKey}
-                  className="px-3 py-2 rounded-lg border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
-                >
-                  清除
-                </button>
-              )}
-            </div>
-
-            {apiKeyError && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-[11px] text-red-600 dark:text-red-400">
-                {apiKeyError}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── Messages area ── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         {messages.length === 0 && !loading ? (
@@ -926,7 +891,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider px-1 mb-1">快速开始</div>
               {QUICK_PROMPTS.map((qp, i) => (
-                <button key={i} onClick={() => handleSend(qp.prompt)} disabled={loading || !chatEnabled}
+                <button key={i} onClick={() => { void handleSend(qp.prompt); }} disabled={loading || !chatEnabled}
                   className="w-full text-left p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group disabled:opacity-50">
                   <div className="flex items-center gap-2">
                     <div className="w-5 h-5 rounded-md bg-purple-500/10 flex items-center justify-center flex-shrink-0">
@@ -941,7 +906,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         ) : (
           <div className="p-3 space-y-4">
             {messages.map(msg => (
-              <MessageBubble key={msg.id} msg={msg} mdComponents={mdComponents} />
+              <MessageBubble key={msg.id} msg={msg} mdComponents={mdComponents} remarkPlugins={mdRemarkPlugins} />
             ))}
 
             {/* Live streaming area */}
@@ -952,6 +917,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 content={streamingContent}
                 codeCount={streamingCodeCount}
                 mdComponents={mdComponents}
+                remarkPlugins={mdRemarkPlugins}
               />
             )}
           </div>
@@ -1030,7 +996,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               </button>
             ) : (
               <button
-                onClick={() => handleSend()}
+                onClick={() => { void handleSend(); }}
                 disabled={!input.trim() || !chatEnabled}
                 className={cn(
                   'w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0',
@@ -1060,7 +1026,8 @@ const LiveStreamingView: React.FC<{
   content: string;
   codeCount: number;
   mdComponents: Record<string, React.FC<any>>;
-}> = ({ thinking, toolCalls, content, codeCount, mdComponents }) => {
+  remarkPlugins?: any[];
+}> = ({ thinking, toolCalls, content, codeCount, mdComponents, remarkPlugins }) => {
   const hasActions = thinking.length > 0 || toolCalls.length > 0;
   const [now, setNow] = useState(Date.now());
 
@@ -1128,7 +1095,7 @@ const LiveStreamingView: React.FC<{
       {content ? (
         <div className="ml-8">
           <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-            <Markdown components={mdComponents}>{content}</Markdown>
+            <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{content}</Markdown>
             <span className="inline-block w-1.5 h-3.5 bg-purple-500 animate-pulse ml-0.5 -mb-0.5 rounded-sm" />
           </div>
         </div>
@@ -1188,7 +1155,8 @@ const LiveActionRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
 const MessageBubble: React.FC<{
   msg: ChatMessage;
   mdComponents: Record<string, React.FC<any>>;
-}> = React.memo(({ msg, mdComponents }) => {
+  remarkPlugins?: any[];
+}> = React.memo(({ msg, mdComponents, remarkPlugins }) => {
 
   /* ── User message ── */
   if (msg.role === 'user') {
@@ -1276,7 +1244,7 @@ const MessageBubble: React.FC<{
         {/* Response text */}
         {msg.content.trim() && (
           <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-            <Markdown components={mdComponents}>{msg.content}</Markdown>
+            <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
           </div>
         )}
       </div>
@@ -1347,15 +1315,15 @@ const ThoughtRow: React.FC<{ steps: ThinkingStep[]; durationMs?: number }> = ({
         className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-purple-500/5 transition-colors text-left"
       >
         <Brain size={13} className="text-purple-500 flex-shrink-0" />
-        <span className="text-[12px] text-[var(--text-main)] flex-1">
+        <span className="text-[12px] text-[var(--text-main)] flex-1 min-w-0 truncate">
           Thought for <span className="font-semibold">{durationLabel}</span>
         </span>
-        {open ? <ChevronDown size={11} className="text-[var(--text-muted)]" /> : <ChevronRight size={11} className="text-[var(--text-muted)]" />}
+        {open ? <ChevronDown size={11} className="text-[var(--text-muted)] flex-shrink-0" /> : <ChevronRight size={11} className="text-[var(--text-muted)] flex-shrink-0" />}
       </button>
       {open && (
         <div className="px-4 pb-3 pt-1 bg-purple-500/3 border-t border-purple-500/10 space-y-1.5 max-h-[200px] overflow-y-auto custom-scrollbar">
           {steps.map((step, i) => (
-            <p key={i} className="text-[11px] text-[var(--text-muted)] leading-relaxed whitespace-pre-wrap">
+            <p key={i} className="text-[11px] text-[var(--text-muted)] leading-relaxed break-words">
               {step.content}
             </p>
           ))}

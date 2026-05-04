@@ -2,13 +2,11 @@ import React from 'react';
 import { 
   PanelLeft, 
   PanelRight, 
-  Code, 
   Save, 
   Download, 
   Play, 
   History, 
   Layers,
-  Sparkles,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -17,10 +15,6 @@ interface ToolbarProps {
   setLeftPanelVisible: (visible: boolean) => void;
   rightPanelVisible: boolean;
   setRightPanelVisible: (visible: boolean) => void;
-  showCode: boolean;
-  setShowCode: (show: boolean) => void;
-  showAI: boolean;
-  setShowAI: (show: boolean) => void;
 }
 
 export const Toolbar = ({
@@ -28,10 +22,6 @@ export const Toolbar = ({
   setLeftPanelVisible,
   rightPanelVisible,
   setRightPanelVisible,
-  showCode,
-  setShowCode,
-  showAI,
-  setShowAI,
 }: ToolbarProps) => {
   return (
     <div className="h-10 border-b border-[var(--border-color)] flex items-center justify-between px-4 bg-[var(--bg-sidebar)]/50 backdrop-blur-sm transition-colors duration-200">
@@ -52,27 +42,6 @@ export const Toolbar = ({
             <PanelRight size={16} />
           </button>
         </div>
-        <div className="h-4 w-px bg-[var(--border-color)]" />
-        <button 
-          onClick={() => setShowCode(!showCode)}
-          className={cn(
-            "flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium rounded transition-colors",
-            showCode ? "text-blue-400 bg-blue-400/10" : "text-[var(--text-main)] hover:bg-[var(--border-color)]"
-          )}
-        >
-          <Code size={14} />
-          {showCode ? "隐藏代码" : "显示代码"}
-        </button>
-        <button 
-          onClick={() => setShowAI(!showAI)}
-          className={cn(
-            "flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium rounded transition-colors",
-            showAI ? "text-purple-500 bg-purple-500/10" : "text-[var(--text-main)] hover:bg-[var(--border-color)]"
-          )}
-        >
-          <Sparkles size={14} />
-          {showAI ? "隐藏 AI" : "AI 助手"}
-        </button>
         <div className="h-4 w-px bg-[var(--border-color)]" />
         <div className="flex items-center gap-1">
           <button className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-[var(--text-main)] hover:bg-[var(--border-color)] rounded transition-colors">

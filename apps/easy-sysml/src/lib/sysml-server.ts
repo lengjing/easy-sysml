@@ -36,15 +36,46 @@ export interface ServerAdminLoginResponse {
   session_header: string;
 }
 
+/**
+ * A file or directory node returned from the server filesystem.
+ *
+ * The `id` is a base64url encoding of the relative path — it changes
+ * when the node is renamed or moved. Always use the ID returned by the
+ * most recent POST/PUT response as the authoritative remoteId.
+ */
 export interface ServerFileRecord {
+  /** base64url-encoded relative path; use as URL segment in file API calls */
   id: string;
-  project_id: string;
-  name: string;
+  type: 'file' | 'directory';
+  /** Relative POSIX path from project root */
   path: string;
-  content: string;
+  /** File name (last segment of path) */
+  name: string;
+  /** File content — only present for type === 'file' */
+  content?: string;
   created_at: number;
   updated_at: number;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Chat session types                                                 */
+/* ------------------------------------------------------------------ */
+
+/** A chat session stored on the backend (messages stored as JSON). */
+export interface ServerChatSession {
+  id: string;
+  project_id: string;
+  title: string;
+  conversation_id: string | null;
+  /** Full message history — only included when fetching a single session */
+  messages?: unknown[];
+  created_at: number;
+  updated_at: number;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
 
 function apiUrl(path: string): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -68,6 +99,10 @@ async function readJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Project API                                                        */
+/* ------------------------------------------------------------------ */
+
 export async function listProjects(): Promise<ServerProjectRecord[]> {
   const response = await fetch(apiUrl('/api/projects'));
   return readJson<ServerProjectRecord[]>(response);
@@ -79,13 +114,15 @@ export async function createProject(input: {
 }): Promise<ServerProjectRecord> {
   const response = await fetch(apiUrl('/api/projects'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
   return readJson<ServerProjectRecord>(response);
 }
+
+/* ------------------------------------------------------------------ */
+/*  Files API (filesystem-based)                                       */
+/* ------------------------------------------------------------------ */
 
 export async function listProjectFiles(projectId: string): Promise<ServerFileRecord[]> {
   const response = await fetch(apiUrl(`/api/projects/${projectId}/files`));
@@ -98,35 +135,116 @@ export async function createProjectFile(
 ): Promise<ServerFileRecord> {
   const response = await fetch(apiUrl(`/api/projects/${projectId}/files`), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, type: 'file' }),
+  });
+  return readJson<ServerFileRecord>(response);
+}
+
+export async function createProjectDirectory(
+  projectId: string,
+  input: { name: string; path: string },
+): Promise<ServerFileRecord> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/files`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, type: 'directory' }),
   });
   return readJson<ServerFileRecord>(response);
 }
 
 export async function updateProjectFile(
   projectId: string,
-  fileId: string,
+  nodeId: string,
   input: { name?: string; path?: string; content?: string },
 ): Promise<ServerFileRecord> {
-  const response = await fetch(apiUrl(`/api/projects/${projectId}/files/${fileId}`), {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/files/${nodeId}`), {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
   return readJson<ServerFileRecord>(response);
 }
 
-export async function deleteProjectFile(projectId: string, fileId: string): Promise<void> {
-  const response = await fetch(apiUrl(`/api/projects/${projectId}/files/${fileId}`), {
+export async function deleteProjectFile(projectId: string, nodeId: string): Promise<void> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/files/${nodeId}`), {
     method: 'DELETE',
   });
   await readJson<{ ok: boolean }>(response);
 }
+
+/* ------------------------------------------------------------------ */
+/*  Chat sessions API                                                  */
+/* ------------------------------------------------------------------ */
+
+export async function listChatSessions(projectId: string): Promise<ServerChatSession[]> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions`));
+  return readJson<ServerChatSession[]>(response);
+}
+
+export async function createChatSession(
+  projectId: string,
+  input: { title?: string; conversation_id?: string | null; messages?: unknown[] },
+): Promise<ServerChatSession> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return readJson<ServerChatSession>(response);
+}
+
+export async function getChatSession(
+  projectId: string,
+  sessionId: string,
+): Promise<ServerChatSession> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}`));
+  return readJson<ServerChatSession>(response);
+}
+
+export async function updateChatSession(
+  projectId: string,
+  sessionId: string,
+  input: { title?: string; conversation_id?: string | null },
+): Promise<ServerChatSession> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return readJson<ServerChatSession>(response);
+}
+
+export async function deleteChatSession(
+  projectId: string,
+  sessionId: string,
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}`),
+    { method: 'DELETE' },
+  );
+  await readJson<{ ok: boolean }>(response);
+}
+
+export async function saveChatSessionMessages(
+  projectId: string,
+  sessionId: string,
+  messages: unknown[],
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}/messages`),
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    },
+  );
+  await readJson<{ ok: boolean; count: number }>(response);
+}
+
+/* ------------------------------------------------------------------ */
+/*  AI API keys                                                        */
+/* ------------------------------------------------------------------ */
 
 export async function listAiApiKeys(sessionToken: string): Promise<ServerAiApiKeyRecord[]> {
   const response = await fetch(apiUrl('/api/ai/keys'), {
@@ -172,6 +290,10 @@ export async function revokeAiApiKey(sessionToken: string, id: string): Promise<
   });
   await readJson<{ ok: boolean }>(response);
 }
+
+/* ------------------------------------------------------------------ */
+/*  Admin session                                                      */
+/* ------------------------------------------------------------------ */
 
 export async function getAdminSession(sessionToken?: string): Promise<ServerAdminSessionStatus> {
   const response = await fetch(apiUrl('/api/admin/session'), {

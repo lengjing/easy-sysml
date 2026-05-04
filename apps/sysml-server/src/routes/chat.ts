@@ -43,7 +43,7 @@ function sseWrite(res: Response, event: string, data: unknown): void {
 chatRouter.post('/', async (req: Request, res: Response) => {
   const db = getDb();
   const session = db
-    .prepare('SELECT * FROM sessions WHERE id = ?')
+    .prepare('SELECT * FROM agent_sessions WHERE id = ?')
     .get(req.params.sessionId) as
     | {
         id: string;
