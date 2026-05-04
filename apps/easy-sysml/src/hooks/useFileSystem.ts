@@ -47,8 +47,15 @@ export interface UseFileSystemReturn {
   activeFileContent: string;
   /** The active file node. */
   activeFile: FileNode | undefined;
+  /** The file currently shown in "preview" mode (single-click, not pinned to tabs). */
+  previewFileId: string | null;
 
   /* Actions */
+  /** Preview a file (single-click). Shows content without adding to persistent tabs. */
+  previewFile: (fileId: string) => void;
+  /** Close the current preview without opening a tab. */
+  closePreview: () => void;
+  /** Open (pin) a file as a persistent tab (double-click). Clears preview. */
   openFile: (fileId: string) => void;
   closeTab: (fileId: string) => void;
   setActiveFile: (fileId: string) => void;
@@ -140,6 +147,7 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
   const [nodes, setNodes] = useState<FileNode[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
 
   const markTabDirty = useCallback((fileId: string, dirty: boolean) => {
     setOpenTabs(prev => prev.map(tab => (tab.fileId === fileId ? { ...tab, dirty } : tab)));
@@ -249,7 +257,30 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
 
   /* -- Actions -- */
 
+  const previewFile = useCallback((fileId: string) => {
+    // If already a pinned tab, just focus it
+    if (openTabs.some(t => t.fileId === fileId)) {
+      setActiveFileId(fileId);
+      return;
+    }
+    setPreviewFileId(fileId);
+    setActiveFileId(fileId);
+  }, [openTabs]);
+
+  const closePreview = useCallback(() => {
+    setPreviewFileId(null);
+    // If the preview file was active, fall back to the last open tab
+    setActiveFileId(prev => {
+      if (prev === previewFileId) {
+        return openTabs.length > 0 ? openTabs[openTabs.length - 1].fileId : null;
+      }
+      return prev;
+    });
+  }, [previewFileId, openTabs]);
+
   const openFile = useCallback((fileId: string) => {
+    // Pin the file: clear preview if it was this file and add to tabs
+    setPreviewFileId(prev => (prev === fileId ? null : prev));
     setOpenTabs(prev => {
       if (prev.some(t => t.fileId === fileId)) return prev;
       return [...prev, { fileId, dirty: false }];
@@ -394,6 +425,7 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
         remainingTabs = prev.filter(t => !toClose.has(t.fileId));
         return remainingTabs;
       });
+      setPreviewFileId(prev => (prev && toClose.has(prev) ? null : prev));
       setActiveFileId(prev => {
         if (prev && toClose.has(prev)) {
           return remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1].fileId : null;
@@ -448,6 +480,9 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     activeFileId,
     activeFileContent,
     activeFile,
+    previewFileId,
+    previewFile,
+    closePreview,
     openFile,
     closeTab,
     setActiveFile: setActiveFileId,

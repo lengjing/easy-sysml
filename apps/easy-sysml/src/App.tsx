@@ -71,6 +71,9 @@ function WorkbenchContent() {
     activeFileId,
     activeFileContent,
     activeFile,
+    previewFileId,
+    previewFile,
+    closePreview,
     openFile,
     closeTab,
     setActiveFile,
@@ -92,8 +95,12 @@ function WorkbenchContent() {
   const setKermlCode = useCallback((code: string) => {
     if (activeFileId) {
       updateFileContent(activeFileId, code);
+      // Auto-pin if this file was only being previewed
+      if (previewFileId === activeFileId) {
+        openFile(activeFileId);
+      }
     }
-  }, [activeFileId, updateFileContent]);
+  }, [activeFileId, updateFileContent, previewFileId, openFile]);
 
   // Get current file URI for LSP
   const currentFileUri = activeFileId ? getUri(activeFileId) : undefined;
@@ -225,12 +232,15 @@ function WorkbenchContent() {
               domainModel={domainModel}
               fsNodes={fsNodes}
               activeFileId={activeFileId}
+              previewFileId={previewFileId}
               getChildren={getChildren}
               onOpenFile={(fileId) => { openFile(fileId); setShowCode(true); }}
+              onPreviewFile={(fileId) => { previewFile(fileId); setShowCode(true); }}
               onCreateFile={(name, parentId) => { createFile(name, parentId); setShowCode(true); }}
               onCreateDirectory={createDirectory}
               onRenameNode={renameNode}
               onDeleteNode={deleteNode}
+              onMoveNode={moveNode}
             />
           )}
         </AnimatePresence>
@@ -263,13 +273,16 @@ function WorkbenchContent() {
                   code={kermlCode}
                   setCode={setKermlCode}
                   onDocumentSymbols={handleDocumentSymbols}
-                  visible={showCode}
+                  visible={showCode && (openTabs.length > 0 || previewFileId !== null)}
                   openTabs={openTabs}
                   activeFileId={activeFileId}
                   onSelectTab={(fileId) => setActiveFile(fileId)}
                   onCloseTab={closeTab}
                   getFileName={getFileName}
                   fileUri={currentFileUri}
+                  previewFileId={previewFileId}
+                  onSelectPreview={() => previewFileId && setActiveFile(previewFileId)}
+                  onClosePreview={closePreview}
                 />
 
                 {/* AI Chat Panel */}

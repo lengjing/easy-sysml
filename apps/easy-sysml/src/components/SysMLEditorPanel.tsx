@@ -1,5 +1,4 @@
 import React from 'react';
-import { Code, CheckCircle2 } from 'lucide-react';
 import { SysMLEditor } from './editor/SysMLEditor';
 import { EditorTabs } from './EditorTabs';
 import type { DocumentSymbol } from 'vscode-languageserver-protocol';
@@ -23,6 +22,12 @@ interface SysMLEditorPanelProps {
   getFileName?: (fileId: string) => string;
   /** Current file URI for LSP. */
   fileUri?: string;
+  /** Preview file id (shown as italic tab). */
+  previewFileId?: string | null;
+  /** Called when user clicks preview tab. */
+  onSelectPreview?: () => void;
+  /** Called when user closes preview tab. */
+  onClosePreview?: () => void;
 }
 
 export const SysMLEditorPanel = ({
@@ -36,9 +41,10 @@ export const SysMLEditorPanel = ({
   onCloseTab,
   getFileName,
   fileUri,
+  previewFileId,
+  onSelectPreview,
+  onClosePreview,
 }: SysMLEditorPanelProps) => {
-  const hasTabs = openTabs && openTabs.length > 0;
-
   // Always render the same tree so the Monaco editor instance (and its undo
   // stack) survives hide/show toggles.  When hidden, move off-screen with
   // zero dimensions so it doesn't affect layout.
@@ -51,28 +57,18 @@ export const SysMLEditorPanel = ({
       }
       aria-hidden={!visible}
     >
-      {/* Tab bar */}
-      {hasTabs && onSelectTab && onCloseTab && getFileName ? (
+      {/* Tab bar — always show when panel is visible */}
+      {onSelectTab && onCloseTab && getFileName && (
         <EditorTabs
-          tabs={openTabs}
+          tabs={openTabs ?? []}
           activeFileId={activeFileId ?? null}
           getFileName={getFileName}
           onSelect={onSelectTab}
           onClose={onCloseTab}
+          previewFileId={previewFileId}
+          onSelectPreview={onSelectPreview}
+          onClosePreview={onClosePreview}
         />
-      ) : (
-        <div className="h-10 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-header)]/50">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Code size={14} className="text-blue-500" />
-              <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">SysML v2 编辑器</span>
-            </div>
-            <div className="flex items-center gap-1 text-[9px] text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded border border-green-500/20">
-              <CheckCircle2 size={10} />
-              LSP 已连接
-            </div>
-          </div>
-        </div>
       )}
       <div className="flex-1 relative overflow-hidden">
         <SysMLEditor

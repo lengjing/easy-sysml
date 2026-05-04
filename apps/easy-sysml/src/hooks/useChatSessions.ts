@@ -137,6 +137,11 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
   const [activeSessionId, setActiveSessionId] = useState<string>(() => sessions[0]!.id);
   const [loading, setLoading] = useState(false);
 
+  // Ref that always points to the current active session ID.
+  // Used by setMessages to avoid stale-closure bugs in async handlers.
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
   // Track which sessions have had their messages loaded (avoids re-fetching)
   const loadedSessionIds = useRef(new Set<string>());
   // Debounce timer for flushing to server
@@ -251,7 +256,9 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
   /* -- setMessages -- */
   const setMessages = useCallback(
     (messages: ChatMessage[]) => {
-      const activeId = activeSessionId;
+      // Use the ref to always get the latest active session ID, avoiding
+      // stale-closure issues when called from inside long-running async handlers.
+      const activeId = activeSessionIdRef.current;
       patchSession(activeId, {
         messages,
         title: deriveTitle(messages),
@@ -262,14 +269,14 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
       flushTimerRef.current = setTimeout(() => {
         flushTimerRef.current = null;
         if (!projectId) return;
-        // Re-read from the session list; if the session is gone (e.g. was deleted
-        // while the debounce was pending), skip the persist.
-        const currentSession = sessions.find(s => s.id === activeId);
-        if (!currentSession) return;
 
-        const isTemp = activeId.startsWith('temp-');
+        // Re-read the active ID at debounce time (may have advanced if promoted
+        // from temp to a real server ID between the call and the flush).
+        const currentActiveId = activeSessionIdRef.current;
+        const isTemp = currentActiveId.startsWith('temp-');
 
         if (isTemp) {
+          if (messages.length === 0) return;
           // Create new server session
           void createChatSession(projectId, {
             title: deriveTitle(messages),
@@ -279,7 +286,7 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
               loadedSessionIds.current.add(created.id);
               setSessions(prev =>
                 prev.map(s =>
-                  s.id === activeId
+                  s.id === currentActiveId
                     ? fromServerSession(created, messages)
                     : s,
                 ),
@@ -290,20 +297,21 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
               console.error('[easy-sysml] Failed to create chat session:', error);
             });
         } else {
-          const title = deriveTitle(messages);
-          // Update existing session
+          // Update existing session — always send title to keep it in sync
           void Promise.all([
-            saveChatSessionMessages(projectId, activeId, messages),
-            title !== currentSession.title
-              ? updateChatSession(projectId, activeId, { title })
-              : Promise.resolve(),
+            saveChatSessionMessages(projectId, currentActiveId, messages),
+            updateChatSession(projectId, currentActiveId, { title: deriveTitle(messages) }),
           ]).catch(error => {
             console.error('[easy-sysml] Failed to save chat session:', error);
           });
         }
       }, 800);
     },
-    [activeSessionId, patchSession, projectId, sessions],
+    // Intentionally excludes activeSessionId and sessions — the ref keeps the
+    // active ID current without requiring the callback to be recreated on every
+    // render, which would cause stale captures inside async event handlers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patchSession, projectId],
   );
 
   /* -- setConversationId -- */

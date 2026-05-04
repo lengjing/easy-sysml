@@ -17,6 +17,7 @@ import {
   XCircle, FileText, FilePen, Search, FolderOpen,
   Globe, Square, Clock, ChevronDown, ChevronRight,
   StopCircle, Zap, Play, ArrowUp, History, MessageSquarePlus,
+  Key, CheckCircle2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
@@ -271,6 +272,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 }) => {
   const chatSessions = useChatSessions(projectId);
 
+  // Ref that always points to the latest chatSessions object.
+  // Used inside handleSend (async) to avoid stale closures.
+  const chatSessionsRef = useRef(chatSessions);
+  chatSessionsRef.current = chatSessions;
+
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCommands, setShowCommands] = useState(false);
@@ -280,6 +286,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [apiKeyDraft, setApiKeyDraft] = useState(loadStoredApiKey);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [showSessions, setShowSessions] = useState(false);
+  // API key form is auto-shown when no key is configured
+  const [showApiKeyForm, setShowApiKeyForm] = useState(() => !loadStoredApiKey().trim());
 
   // Streaming state
   const [streamingContent, setStreamingContent] = useState('');
@@ -387,6 +395,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     setApiKey(nextKey);
     setApiKeyDraft(nextKey);
     setApiKeyError(null);
+    setShowApiKeyForm(false);
   }, [apiKeyDraft]);
 
   const handleClearApiKey = useCallback(() => {
@@ -402,6 +411,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     if (!userText || loading) return;
     if (apiKeyRequired && !apiKey.trim()) {
       setApiKeyError('请先输入 AI API key');
+      setShowApiKeyForm(true);
       return;
     }
 
@@ -425,7 +435,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     // Snapshot current messages + new user message for this turn
     const turnStartMessages = [...messagesSnapshotRef.current, userMsg];
     messagesSnapshotRef.current = turnStartMessages;
-    chatSessions.setMessages(turnStartMessages);
+    chatSessionsRef.current.setMessages(turnStartMessages);
 
     setLoading(true);
     setStreamingContent('');
@@ -460,7 +470,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         body: JSON.stringify({
           messages: history,
           currentCode: currentCode?.trim() || undefined,
-          conversationId: chatSessions.conversationId || undefined,
+          conversationId: chatSessionsRef.current.conversationId || undefined,
           autoApply: true,
           projectId,
         }),
@@ -499,7 +509,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               switch (currentEvent) {
                 case 'session': {
                   if (data.conversationId) {
-                    chatSessions.setConversationId(data.conversationId);
+                    chatSessionsRef.current.setConversationId(data.conversationId);
                   }
                   break;
                 }
@@ -571,7 +581,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     codesSynced: codeCount, timestamp: Date.now(),
                   };
                   turnMessages = [...turnMessages, errorMsg];
-                  chatSessions.setMessages(turnMessages);
+                  chatSessionsRef.current.setMessages(turnMessages);
                   break;
                 }
                 case 'done': {
@@ -590,7 +600,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                       timestamp: Date.now(),
                     };
                     turnMessages = [...turnMessages, assistantMsg];
-                    chatSessions.setMessages(turnMessages);
+                    chatSessionsRef.current.setMessages(turnMessages);
                   }
                   break;
                 }
@@ -610,7 +620,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
       };
       turnMessages = [...turnMessages, errorMsg];
-      chatSessions.setMessages(turnMessages);
+      chatSessionsRef.current.setMessages(turnMessages);
     } finally {
       setLoading(false);
       setStreamingContent('');
@@ -619,7 +629,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setStreamingCodeCount(0);
       abortRef.current = null;
     }
-  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, chatSessions, currentCode, executeCommand, input, loading, onApplyCode, projectId]);
+  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, currentCode, executeCommand, input, loading, onApplyCode, projectId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); }
@@ -677,6 +687,23 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* API Key indicator button */}
+          {apiKeyRequired && (
+            <button
+              onClick={() => setShowApiKeyForm(v => !v)}
+              className={cn(
+                'p-1.5 rounded transition-colors',
+                showApiKeyForm
+                  ? 'bg-purple-500/10 text-purple-500'
+                  : hasConfiguredApiKey
+                  ? 'text-emerald-600 dark:text-emerald-400 hover:bg-[var(--border-color)]'
+                  : 'text-amber-500 hover:bg-[var(--border-color)] animate-pulse',
+              )}
+              title={hasConfiguredApiKey ? 'API Key 已配置（点击修改）' : '需要配置 API Key'}
+            >
+              {hasConfiguredApiKey ? <CheckCircle2 size={13} /> : <Key size={13} />}
+            </button>
+          )}
           {/* Sessions toggle */}
           <button
             onClick={() => setShowSessions(v => !v)}
@@ -703,6 +730,57 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* ── API Key form (collapsible) ── */}
+      {apiKeyRequired && showApiKeyForm && (
+        <div className="border-b border-[var(--border-color)] bg-[var(--bg-main)] flex-shrink-0 px-3 py-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-[var(--text-main)]">AI API Key</span>
+            {hasConfiguredApiKey && (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={10} />已配置
+              </span>
+            )}
+          </div>
+          {!hasConfiguredApiKey && (
+            <p className="text-[11px] text-[var(--text-muted)]">
+              请输入分配的 API key，系统会自动附加到每次 AI 请求中。
+            </p>
+          )}
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={apiKeyDraft}
+              onChange={e => setApiKeyDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleSaveApiKey();
+                if (e.key === 'Escape') setShowApiKeyForm(false);
+              }}
+              placeholder="输入或粘贴 API key"
+              className="flex-1 min-w-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-1.5 text-[12px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-purple-500/40"
+            />
+            <button
+              onClick={handleSaveApiKey}
+              className="px-3 py-1.5 rounded-lg bg-purple-500 text-white text-[11px] font-medium hover:bg-purple-600 transition-colors"
+            >
+              保存
+            </button>
+            {hasConfiguredApiKey && (
+              <button
+                onClick={handleClearApiKey}
+                className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:text-red-500 hover:border-red-500/30 transition-colors"
+              >
+                清除
+              </button>
+            )}
+          </div>
+          {apiKeyError && (
+            <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400">
+              {apiKeyError}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Sessions panel ── */}
       {showSessions && (
@@ -760,51 +838,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           <div className="flex items-center gap-1.5 px-2 py-1">
             <AlertCircle size={12} className="text-amber-500 flex-shrink-0" />
             <span className="text-[12px] text-amber-600 dark:text-amber-400">{backendError}</span>
-          </div>
-        </div>
-      )}
-
-      {apiKeyRequired && (
-        <div className="border-b border-[var(--border-color)] bg-[var(--bg-main)] flex-shrink-0">
-          <div className="px-3 py-2.5 space-y-2">
-            <div>
-              <div className="text-[12px] font-semibold text-[var(--text-main)]">AI API Key</div>
-              <div className="text-[11px] text-[var(--text-muted)]">
-                {hasConfiguredApiKey
-                  ? '已配置，将自动附加到 AI 请求。'
-                  : '使用 AI 模块前需要先配置一个已分配的 API key。管理员可在 API Key 管理页创建和吊销 key。'}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKeyDraft}
-                onChange={e => setApiKeyDraft(e.target.value)}
-                placeholder="输入或粘贴 API key"
-                className="flex-1 min-w-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-2 text-[12px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-purple-500/40"
-              />
-              <button
-                onClick={handleSaveApiKey}
-                className="px-3 py-2 rounded-lg bg-purple-500 text-white text-[11px] font-medium hover:bg-purple-600 transition-colors"
-              >
-                保存
-              </button>
-              {hasConfiguredApiKey && (
-                <button
-                  onClick={handleClearApiKey}
-                  className="px-3 py-2 rounded-lg border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
-                >
-                  清除
-                </button>
-              )}
-            </div>
-
-            {apiKeyError && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-[11px] text-red-600 dark:text-red-400">
-                {apiKeyError}
-              </div>
-            )}
           </div>
         </div>
       )}
