@@ -1,21 +1,22 @@
 /**
- * AI Chat Panel — Copilot-style Agent Interface
+ * AI Chat Panel — Google AI Studio-style Agent Interface
  *
  * Communicates with sysml-server via SSE streaming, which proxies to free-code agent.
  * - Streams markdown content token-by-token (rendered via react-markdown)
  * - Auto-applies SysML code to editor when the agent writes a .sysml file
- * - Shows thinking steps, tool calls and file operations inline (Copilot-style)
+ * - Shows action history inline: "Thought for X.X seconds", "Read file", "Edited file", etc.
  * - Supports slash commands: /code, /help, /clear
- * - Maintains conversation state (conversationId) for multi-turn sessions
+ * - Maintains multiple named sessions with localStorage persistence
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Markdown from 'react-markdown';
 import {
-  Sparkles, Send, Plus, Loader2,
-  MessageSquare, AlertCircle, Brain, Terminal,
+  Sparkles, Plus, Loader2,
+  AlertCircle, Brain, Terminal,
   FileCode, HelpCircle, Trash2, CheckCircle, Wrench,
   XCircle, FileText, FilePen, Search, FolderOpen,
   Globe, Square, Clock, ChevronDown, ChevronRight,
+  StopCircle, Zap, Play, ArrowUp, History, MessageSquarePlus,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -50,7 +51,21 @@ interface ChatMessage {
   codesSynced: number;
   /** Duration from free-code result message */
   durationMs?: number;
+  /** How long the model spent thinking (ms) before first tool/response */
+  thinkingDurationMs?: number;
   timestamp: number;
+}
+
+/** A chat session — stored in localStorage for persistence across page reloads */
+interface StoredSession {
+  id: string;
+  /** Derived from the first user message */
+  title: string;
+  messages: ChatMessage[];
+  /** sysml-server conversation label; kept in sync so the server can log turns
+   *  against a stable ID even though a fresh free-code session is created per turn */
+  conversationId: string | null;
+  createdAt: number;
 }
 
 interface AIChatPanelProps {
@@ -92,64 +107,129 @@ const QUICK_PROMPTS = [
 ];
 
 /* ------------------------------------------------------------------ */
-/*  Tool icon + summary helpers                                       */
+/*  Tool icon + action label helpers (Google AI Studio style)         */
 /* ------------------------------------------------------------------ */
 
-function ToolIcon({ name, size = 9 }: { name: string; size?: number }) {
+function ToolIcon({ name, size = 12 }: { name: string; size?: number }) {
   const n = name.toLowerCase();
-  if (n === 'bash')                         return <Terminal size={size} />;
-  if (n === 'write')                        return <FilePen size={size} />;
-  if (n === 'read')                         return <FileText size={size} />;
-  if (n === 'edit' || n === 'multiedit')    return <FilePen size={size} />;
-  if (n === 'glob' || n === 'listdir')      return <FolderOpen size={size} />;
-  if (n === 'grep')                         return <Search size={size} />;
-  if (n === 'webfetch')                     return <Globe size={size} />;
+  if (n === 'bash')                          return <Terminal size={size} />;
+  if (n === 'write')                         return <FilePen size={size} />;
+  if (n === 'read')                          return <FileText size={size} />;
+  if (n === 'edit' || n === 'multiedit')     return <FilePen size={size} />;
+  if (n === 'glob' || n === 'listdir')       return <FolderOpen size={size} />;
+  if (n === 'grep')                          return <Search size={size} />;
+  if (n === 'webfetch')                      return <Globe size={size} />;
   if (n === 'todoread' || n === 'todowrite') return <Square size={size} />;
   return <Wrench size={size} />;
 }
 
-function getToolSummary(name: string, input?: Record<string, unknown>): string {
-  if (!input) return '';
+/** Returns a human-readable action description (Google AI Studio style) */
+function getActionDescription(name: string, input?: Record<string, unknown>): string {
   const n = name.toLowerCase();
+
+  if (n === 'read') {
+    const file = String(input?.file_path ?? input?.path ?? '');
+    return file ? `Read file ${getBasename(file)}` : 'Read file';
+  }
+  if (n === 'write') {
+    const file = String(input?.file_path ?? input?.path ?? '');
+    return file ? `Wrote to ${getBasename(file)}` : 'Wrote file';
+  }
+  if (n === 'edit' || n === 'multiedit') {
+    const file = String(input?.file_path ?? input?.path ?? input?.new_path ?? '');
+    return file ? `Edited ${getBasename(file)}` : 'Edited file';
+  }
   if (n === 'bash') {
-    const cmd = String(input.command ?? input.cmd ?? '').trim();
-    return cmd.length > 60 ? cmd.slice(0, 57) + '…' : cmd;
+    const cmd = String(input?.command ?? input?.cmd ?? '').trim();
+    if (/lint|format|check|validate|prettier|eslint|tsc|typecheck/.test(cmd)) {
+      return 'Ran quality control';
+    }
+    if (/test|spec|jest|vitest|mocha/.test(cmd)) {
+      return 'Ran tests';
+    }
+    if (/ls|find|cat|head|tail|pwd|echo/.test(cmd.split(' ')[0] ?? '')) {
+      return 'Explored files';
+    }
+    const shortCmd = cmd.length > 40 ? cmd.slice(0, 37) + '…' : cmd;
+    return shortCmd ? `Ran: ${shortCmd}` : 'Ran shell command';
   }
-  if (n === 'write' || n === 'read' || n === 'edit' || n === 'multiedit') {
-    return String(input.file_path ?? input.path ?? input.new_path ?? '');
+  if (n === 'grep') {
+    const pattern = String(input?.pattern ?? '');
+    return pattern ? `Searched for "${pattern.slice(0, 30)}"` : 'Searched in files';
   }
-  if (n === 'glob') return String(input.pattern ?? '');
-  if (n === 'grep') return `"${String(input.pattern ?? '')}"`;
+  if (n === 'glob') {
+    const pat = String(input?.pattern ?? '');
+    return pat ? `Listed files (${pat})` : 'Listed files';
+  }
+  if (n === 'listdir') {
+    const dir = String(input?.path ?? '.');
+    return `Listed ${getBasename(dir) || '.'}`;
+  }
   if (n === 'webfetch') {
-    const url = String(input.url ?? '');
-    return url.length > 50 ? url.slice(0, 47) + '…' : url;
+    const url = String(input?.url ?? '');
+    try {
+      return `Fetched ${new URL(url).hostname}`;
+    } catch {
+      return 'Fetched URL';
+    }
   }
-  return '';
+  if (n === 'todoread')  return 'Read task list';
+  if (n === 'todowrite') return 'Updated task list';
+  return name;
 }
 
-function getToolLabel(name: string): string {
-  const n = name.toLowerCase();
-  if (n === 'bash')      return 'Bash';
-  if (n === 'write')     return 'Write';
-  if (n === 'read')      return 'Read';
-  if (n === 'edit')      return 'Edit';
-  if (n === 'multiedit') return 'MultiEdit';
-  if (n === 'listdir')   return 'ListDir';
-  if (n === 'glob')      return 'Glob';
-  if (n === 'grep')      return 'Grep';
-  if (n === 'webfetch')  return 'WebFetch';
-  if (n === 'todoread')  return 'TodoRead';
-  if (n === 'todowrite') return 'TodoWrite';
-  return name;
+function getBasename(filePath: string): string {
+  return filePath.split('/').pop()?.split('\\').pop() ?? filePath;
 }
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
 
+/** Fraction of total duration to attribute to thinking when no end-marker was observed */
+const THINKING_DURATION_ESTIMATE_RATIO = 0.3;
+/** Cap on estimated thinking duration in ms */
+const MAX_THINKING_DURATION_MS = 10_000;
+/** Maximum characters used for the session title derived from the first user message */
+const MAX_TITLE_LENGTH = 40;
+/** Maximum number of sessions to persist in localStorage */
+const MAX_STORED_SESSIONS = 50;
+
 let _nextId = 0;
 function makeId(): string {
   return `msg-${Date.now()}-${_nextId++}`;
+}
+
+let _nextSessionId = 0;
+function makeSessionId(): string {
+  return `sess-${Date.now()}-${_nextSessionId++}`;
+}
+
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  return `${Math.floor(diff / 86_400_000)} 天前`;
+}
+
+const SESSIONS_STORAGE_KEY = 'ai-chat-sessions-v1';
+
+function loadSessions(): StoredSession[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredSession[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSessions(sessions: StoredSession[]): void {
+  try {
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.slice(0, MAX_STORED_SESSIONS)));
+  } catch {
+    // ignore quota errors
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -225,8 +305,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
 
-  // Conversation state — persists across messages for multi-turn sessions
+  // Conversation state — sent to sysml-server so it can reuse the convId label
   const [conversationId, setConversationId] = useState<string | null>(null);
+
+  // Sessions management
+  const [sessions, setSessions] = useState<StoredSession[]>(loadSessions);
+  const [activeSessionId, setActiveSessionId] = useState<string>(makeSessionId);
+  const [showSessions, setShowSessions] = useState(false);
 
   // Streaming state
   const [streamingContent, setStreamingContent] = useState('');
@@ -234,9 +319,32 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [streamingToolCalls, setStreamingToolCalls] = useState<ToolCall[]>([]);
   const [streamingCodeCount, setStreamingCodeCount] = useState(0);
 
+  // Thinking duration tracking
+  const thinkingStartTsRef = useRef<number | null>(null);
+  const thinkingEndTsRef = useRef<number | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  /* ---------- Auto-save current session whenever messages change ---------- */
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    const title = firstUserMsg
+      ? firstUserMsg.content.slice(0, MAX_TITLE_LENGTH) + (firstUserMsg.content.length > MAX_TITLE_LENGTH ? '…' : '')
+      : '新对话';
+    setSessions(prev => {
+      const exists = prev.find(s => s.id === activeSessionId);
+      const updated: StoredSession[] = exists
+        ? prev.map(s => s.id === activeSessionId
+            ? { ...s, title, messages, conversationId }
+            : s)
+        : [{ id: activeSessionId, title, messages, conversationId, createdAt: Date.now() }, ...prev];
+      saveSessions(updated);
+      return updated;
+    });
+  }, [messages, conversationId, activeSessionId]);
 
   /* ---------- Check backend status on mount ---------- */
   useEffect(() => {
@@ -337,6 +445,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     setStreamingThinking([]);
     setStreamingToolCalls([]);
     setStreamingCodeCount(0);
+    thinkingStartTsRef.current = null;
+    thinkingEndTsRef.current = null;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -393,19 +503,26 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               const data = JSON.parse(line.slice(6));
               switch (currentEvent) {
                 case 'session': {
-                  // Store conversation ID for follow-up messages
                   if (data.conversationId) {
                     setConversationId(data.conversationId);
                   }
                   break;
                 }
                 case 'thinking': {
-                  const step: ThinkingStep = { content: data.content, timestamp: Date.now() };
+                  const now = Date.now();
+                  if (thinkingStartTsRef.current === null) {
+                    thinkingStartTsRef.current = now;
+                  }
+                  const step: ThinkingStep = { content: data.content, timestamp: now };
                   thinkingAcc.push(step);
                   setStreamingThinking([...thinkingAcc]);
                   break;
                 }
                 case 'delta': {
+                  // Mark end of thinking when first content arrives
+                  if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
+                    thinkingEndTsRef.current = Date.now();
+                  }
                   contentAcc += data.content;
                   setStreamingContent(contentAcc);
                   break;
@@ -419,6 +536,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   break;
                 }
                 case 'tool_call': {
+                  // Mark end of thinking when first tool call arrives
+                  if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
+                    thinkingEndTsRef.current = Date.now();
+                  }
                   const tc: ToolCall = {
                     id: data.id,
                     name: data.name || 'unknown',
@@ -461,12 +582,19 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   break;
                 }
                 case 'done': {
-                  if (contentAcc.trim() || codeCount > 0) {
+                  if (contentAcc.trim() || codeCount > 0 || toolCallAcc.length > 0) {
+                    const thinkingDurationMs =
+                      thinkingStartTsRef.current !== null && thinkingEndTsRef.current !== null
+                        ? thinkingEndTsRef.current - thinkingStartTsRef.current
+                        : thinkingAcc.length > 0 && durationMs
+                        ? Math.min(durationMs * THINKING_DURATION_ESTIMATE_RATIO, MAX_THINKING_DURATION_MS)
+                        : undefined;
                     const assistantMsg: ChatMessage = {
                       id: makeId(), role: 'assistant', content: contentAcc,
                       provider: backendStatus?.providerLabel || 'free-code',
                       thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
-                      codesSynced: codeCount, durationMs, timestamp: Date.now(),
+                      codesSynced: codeCount, durationMs, thinkingDurationMs,
+                      timestamp: Date.now(),
                     };
                     setMessages(prev => [...prev, assistantMsg]);
                   }
@@ -503,14 +631,46 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   }, [handleSend]);
 
   const handleNewChat = useCallback(() => {
+    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     setMessages([]);
     setInput('');
     setConversationId(null);
     setStreamingContent('');
     setStreamingThinking([]);
     setStreamingToolCalls([]);
-    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+    setStreamingCodeCount(0);
+    setActiveSessionId(makeSessionId());
+    setShowSessions(false);
   }, []);
+
+  const switchToSession = useCallback((session: StoredSession) => {
+    if (loading) return;
+    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+    setMessages(session.messages);
+    setConversationId(session.conversationId);
+    setActiveSessionId(session.id);
+    setInput('');
+    setStreamingContent('');
+    setStreamingThinking([]);
+    setStreamingToolCalls([]);
+    setStreamingCodeCount(0);
+    setShowSessions(false);
+  }, [loading]);
+
+  const deleteSession = useCallback((sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSessions(prev => {
+      const updated = prev.filter(s => s.id !== sessionId);
+      saveSessions(updated);
+      return updated;
+    });
+    if (sessionId === activeSessionId) {
+      // Start fresh when deleting the active session
+      setMessages([]);
+      setConversationId(null);
+      setActiveSessionId(makeSessionId());
+    }
+  }, [activeSessionId]);
 
   const mdComponents = useMemo(() => markdownComponents, []);
 
@@ -520,36 +680,100 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-[var(--bg-sidebar)]">
-      {/* Header */}
-      <div className="h-10 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-header)]/50 flex-shrink-0">
+      {/* ── Header ── */}
+      <div className="h-11 border-b border-[var(--border-color)] flex items-center justify-between px-3 bg-[var(--bg-header)] flex-shrink-0">
         <div className="flex items-center gap-2">
-          <Sparkles size={14} className="text-purple-500" />
-          <span className="text-[12px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
-            Copilot
-          </span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
-            Agent
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          {backendStatus && (
-            <span className="px-2 py-0.5 rounded border border-[var(--border-color)] text-[11px] font-medium text-[var(--text-muted)]">
+          <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+            <Sparkles size={12} className="text-white" />
+          </div>
+          <span className="text-[13px] font-semibold text-[var(--text-main)]">Agent</span>
+          {backendStatus?.ok && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
               free-code
             </span>
           )}
+        </div>
+        <div className="flex items-center gap-1">
+          {/* Sessions toggle */}
+          <button
+            onClick={() => setShowSessions(v => !v)}
+            className={cn(
+              'flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors',
+              showSessions
+                ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
+                : 'text-[var(--text-muted)] hover:bg-[var(--border-color)] hover:text-[var(--text-main)]',
+            )}
+            title="聊天记录"
+          >
+            <History size={13} />
+            {sessions.length > 0 && (
+              <span className="text-[10px] font-medium tabular-nums">{sessions.length}</span>
+            )}
+          </button>
+          {/* New chat */}
           <button
             onClick={handleNewChat}
-            className="p-1 hover:bg-[var(--border-color)] rounded text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+            className="p-1.5 hover:bg-[var(--border-color)] rounded text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
             title="新对话"
           >
-            <Plus size={14} />
+            <MessageSquarePlus size={14} />
           </button>
         </div>
       </div>
 
-      {/* Error banner */}
+      {/* ── Sessions panel ── */}
+      {showSessions && (
+        <div className="border-b border-[var(--border-color)] bg-[var(--bg-main)] flex-shrink-0 max-h-[55vh] overflow-y-auto custom-scrollbar">
+          {/* New chat button */}
+          <button
+            onClick={handleNewChat}
+            className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-purple-500/5 transition-colors border-b border-[var(--border-color)] text-left"
+          >
+            <div className="w-5 h-5 rounded border border-dashed border-purple-500/40 flex items-center justify-center flex-shrink-0">
+              <Plus size={11} className="text-purple-500" />
+            </div>
+            <span className="text-[12px] font-medium text-purple-600 dark:text-purple-400">新对话</span>
+          </button>
+          {sessions.length === 0 ? (
+            <p className="text-center text-[11px] text-[var(--text-muted)] py-5">暂无历史会话</p>
+          ) : (
+            sessions.map(session => (
+              <div
+                key={session.id}
+                onClick={() => switchToSession(session)}
+                className={cn(
+                  'group flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors border-b border-[var(--border-color)]/50 last:border-b-0',
+                  session.id === activeSessionId
+                    ? 'bg-purple-500/8 hover:bg-purple-500/12'
+                    : 'hover:bg-[var(--border-color)]/40',
+                )}
+              >
+                {/* Active indicator */}
+                <div className={cn(
+                  'w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors',
+                  session.id === activeSessionId ? 'bg-purple-500' : 'bg-transparent group-hover:bg-[var(--text-muted)]/30',
+                )} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium text-[var(--text-main)] truncate">{session.title}</p>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{formatRelativeTime(session.createdAt)}</p>
+                </div>
+                {/* Delete button (hover only) */}
+                <button
+                  onClick={(e) => deleteSession(session.id, e)}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-500 transition-all flex-shrink-0"
+                  title="删除会话"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── Error banner ── */}
       {backendError && (
-        <div className="border-b border-[var(--border-color)] p-2 bg-amber-500/10">
+        <div className="border-b border-[var(--border-color)] p-2 bg-amber-500/10 flex-shrink-0">
           <div className="flex items-center gap-1.5 px-2 py-1">
             <AlertCircle size={12} className="text-amber-500 flex-shrink-0" />
             <span className="text-[12px] text-amber-600 dark:text-amber-400">{backendError}</span>
@@ -557,29 +781,29 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         </div>
       )}
 
-      {/* Messages */}
+      {/* ── Messages area ── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         {messages.length === 0 && !loading ? (
+          /* Welcome screen */
           <div className="p-4 flex flex-col gap-4">
-            <div className="text-center py-6">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-purple-500/10 mb-3">
-                <Sparkles size={24} className="text-purple-500" />
+            <div className="text-center py-8">
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-purple-500/20 to-blue-500/20 mb-4">
+                <Sparkles size={28} className="text-purple-500" />
               </div>
-              <h3 className="text-sm font-bold text-[var(--text-main)] mb-1">SysML v2 Copilot</h3>
-              <p className="text-[12px] text-[var(--text-muted)] max-w-[280px] mx-auto leading-relaxed">
-                free-code Agent · 实时工具调用 · 文件直接写入编辑器
-              </p>
-              <p className="text-[11px] text-[var(--text-muted)] mt-2">
-                输入 <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-purple-600 dark:text-purple-400 text-[10px] font-mono">/</code> 查看命令
+              <h3 className="text-sm font-semibold text-[var(--text-main)] mb-1.5">SysML v2 Agent</h3>
+              <p className="text-[12px] text-[var(--text-muted)] max-w-[260px] mx-auto leading-relaxed">
+                由 free-code Agent 驱动，可直接读写文件、执行命令，并将 SysML 代码同步到编辑器
               </p>
             </div>
-            <div className="space-y-1.5">
-              <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider px-1">快速开始</div>
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider px-1 mb-1">快速开始</div>
               {QUICK_PROMPTS.map((qp, i) => (
                 <button key={i} onClick={() => handleSend(qp.prompt)} disabled={loading || !aiAvailable}
-                  className="w-full text-left p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/50 hover:bg-purple-500/5 transition-all group disabled:opacity-50">
+                  className="w-full text-left p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group disabled:opacity-50">
                   <div className="flex items-center gap-2">
-                    <MessageSquare size={11} className="text-purple-500 flex-shrink-0" />
+                    <div className="w-5 h-5 rounded-md bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                      <Zap size={10} className="text-purple-500" />
+                    </div>
                     <span className="text-[12px] font-medium text-[var(--text-main)] group-hover:text-purple-600 dark:group-hover:text-purple-400">{qp.label}</span>
                   </div>
                 </button>
@@ -587,113 +811,111 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             </div>
           </div>
         ) : (
-          <div className="p-3 space-y-3">
+          <div className="p-3 space-y-4">
             {messages.map(msg => (
               <MessageBubble key={msg.id} msg={msg} mdComponents={mdComponents} />
             ))}
 
-            {/* Streaming in-progress */}
+            {/* Live streaming area */}
             {loading && (
-              <div className="space-y-1.5">
-                {/* Thinking steps */}
-                {streamingThinking.length > 0 && (
-                  <div className="ml-1 border-l-2 border-purple-500/30 pl-2">
-                    <div className="flex items-center gap-1.5 mb-1 text-[10px] font-bold text-purple-500 uppercase">
-                      <Brain size={8} />
-                      <span>思考中…</span>
-                    </div>
-                    <div className="space-y-0.5 max-h-[80px] overflow-hidden">
-                      {streamingThinking.slice(-3).map((step, si) => (
-                        <div key={si} className="text-[11px] text-[var(--text-muted)] line-clamp-2">
-                          {step.content}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Tool calls */}
-                {streamingToolCalls.length > 0 && (
-                  <div className="space-y-0.5">
-                    {streamingToolCalls.map((tc, ti) => (
-                      <StreamingToolCall key={ti} tc={tc} />
-                    ))}
-                  </div>
-                )}
-
-                {/* Code synced badge */}
-                {streamingCodeCount > 0 && (
-                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle size={9} />
-                    <span>{streamingCodeCount} 个文件已同步到编辑器</span>
-                  </div>
-                )}
-
-                {/* Streaming content */}
-                {streamingContent ? (
-                  <div className="rounded-lg p-3 bg-[var(--bg-main)] border border-[var(--border-color)]">
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <Sparkles size={10} className="text-purple-500" />
-                      <span className="text-[11px] font-bold text-purple-500 uppercase">
-                        free-code
-                      </span>
-                    </div>
-                    <div className="text-[13px] text-[var(--text-main)] leading-relaxed prose-sm">
-                      <Markdown components={mdComponents}>{streamingContent}</Markdown>
-                      <span className="inline-block w-1.5 h-3.5 bg-purple-500 animate-pulse ml-0.5 -mb-0.5 rounded-sm" />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--bg-main)] border border-[var(--border-color)]">
-                    <Loader2 size={14} className="text-purple-500 animate-spin" />
-                    <span className="text-[13px] text-[var(--text-muted)]">
-                      Agent 工作中…
-                    </span>
-                  </div>
-                )}
-              </div>
+              <LiveStreamingView
+                thinking={streamingThinking}
+                toolCalls={streamingToolCalls}
+                content={streamingContent}
+                codeCount={streamingCodeCount}
+                mdComponents={mdComponents}
+              />
             )}
           </div>
         )}
       </div>
 
-      {/* Slash command popup */}
+      {/* ── Slash command popup ── */}
       {showCommands && (
-        <div className="border-t border-[var(--border-color)] bg-[var(--bg-main)] px-2 py-1">
-          <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 px-1">命令</div>
+        <div className="border-t border-[var(--border-color)] bg-[var(--bg-main)] px-2 py-1.5 flex-shrink-0">
+          <div className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1 px-1">命令</div>
           {SLASH_COMMANDS.map(cmd => (
             <button key={cmd.name} onClick={() => executeCommand(cmd.name)}
-              className="w-full text-left px-2 py-1 rounded flex items-center gap-2 hover:bg-purple-500/10 transition-colors">
+              className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 hover:bg-purple-500/10 transition-colors">
               <span className="text-purple-500">{cmd.icon}</span>
-              <span className="text-[12px] font-mono font-bold text-[var(--text-main)]">{cmd.label}</span>
-              <span className="text-[13px] text-[var(--text-muted)]">{cmd.description}</span>
+              <span className="text-[12px] font-mono font-semibold text-[var(--text-main)]">{cmd.label}</span>
+              <span className="text-[12px] text-[var(--text-muted)]">{cmd.description}</span>
             </button>
           ))}
         </div>
       )}
 
-      {/* Input area */}
-      <div className="border-t border-[var(--border-color)] p-2 flex-shrink-0">
+      {/* ── Input area — Google AI Studio style ── */}
+      <div className="flex-shrink-0 px-3 pb-3 pt-2">
         {!aiAvailable && !backendError && (
-          <div className="mb-2 flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20">
-            <AlertCircle size={11} className="text-amber-500 flex-shrink-0" />
-            <span className="text-[13px] text-amber-600 dark:text-amber-400">正在连接后端…</span>
+          <div className="mb-2 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <Loader2 size={11} className="text-amber-500 animate-spin flex-shrink-0" />
+            <span className="text-[12px] text-amber-600 dark:text-amber-400">正在连接后端…</span>
           </div>
         )}
-        <div className="flex items-end gap-1.5">
-          <textarea ref={inputRef} value={input} onChange={handleInputChange} onKeyDown={handleKeyDown}
-            placeholder={aiAvailable ? '描述您想要的模型，输入 / 查看命令…' : '等待后端连接…'}
-            disabled={loading} rows={1}
-            className="flex-1 bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 transition-all resize-none text-[var(--text-main)] placeholder:text-[var(--text-muted)] disabled:opacity-50 min-h-[36px] max-h-[120px]"
-            style={{ height: 'auto' }}
-            onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; }}
+        <div className={cn(
+          'relative rounded-2xl border transition-all bg-[var(--bg-main)]',
+          loading || !aiAvailable
+            ? 'border-[var(--border-color)] opacity-60'
+            : 'border-[var(--border-color)] hover:border-[var(--text-muted)]/40 focus-within:border-purple-500/40 focus-within:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]',
+        )}>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={loading ? '生成中…' : aiAvailable ? '向 Agent 发送消息…' : '正在连接后端…'}
+            disabled={loading || !aiAvailable}
+            rows={1}
+            className="w-full bg-transparent px-4 pt-3 pb-1 text-[13px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] resize-none focus:outline-none disabled:cursor-not-allowed min-h-[44px] max-h-[150px]"
+            onInput={(e) => {
+              const t = e.currentTarget;
+              t.style.height = 'auto';
+              t.style.height = Math.min(t.scrollHeight, 150) + 'px';
+            }}
           />
-          <button onClick={() => handleSend()} disabled={loading || !input.trim()}
-            className={cn('p-2 rounded-lg transition-all flex-shrink-0',
-              input.trim() ? 'bg-purple-500 text-white hover:bg-purple-600 shadow-sm' : 'bg-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed')}
-            title="发送">
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-          </button>
+          {/* Bottom toolbar */}
+          <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
+            {/* Left: slash commands trigger */}
+            <button
+              onClick={() => setShowCommands(v => !v)}
+              className={cn(
+                'flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-colors',
+                showCommands
+                  ? 'text-purple-500 bg-purple-500/10'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-main)]',
+              )}
+              title="查看命令 (/)"
+              tabIndex={-1}
+            >
+              <Terminal size={12} />
+              <span className="font-mono">/</span>
+            </button>
+            {/* Right: send / stop button — stop replaces send during generation */}
+            {loading ? (
+              <button
+                onClick={() => { abortRef.current?.abort(); }}
+                className="w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0 bg-red-500 text-white hover:bg-red-600 shadow-sm shadow-red-500/20"
+                title="停止生成"
+              >
+                <StopCircle size={13} />
+              </button>
+            ) : (
+              <button
+                onClick={() => handleSend()}
+                disabled={!input.trim() || !aiAvailable}
+                className={cn(
+                  'w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0',
+                  input.trim() && aiAvailable
+                    ? 'bg-purple-500 text-white hover:bg-purple-600 shadow-sm shadow-purple-500/20'
+                    : 'bg-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed',
+                )}
+                title="发送 (Enter)"
+              >
+                <ArrowUp size={13} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -701,114 +923,215 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 };
 
 /* ------------------------------------------------------------------ */
-/*  StreamingToolCall — inline tool row during streaming             */
+/*  LiveStreamingView — live action feed during streaming             */
 /* ------------------------------------------------------------------ */
 
-const StreamingToolCall: React.FC<{ tc: ToolCall }> = ({ tc }) => {
-  const summary = getToolSummary(tc.name, tc.input);
-  const label = getToolLabel(tc.name);
+const LiveStreamingView: React.FC<{
+  thinking: ThinkingStep[];
+  toolCalls: ToolCall[];
+  content: string;
+  codeCount: number;
+  mdComponents: Record<string, React.FC<any>>;
+}> = ({ thinking, toolCalls, content, codeCount, mdComponents }) => {
+  const hasActions = thinking.length > 0 || toolCalls.length > 0;
 
   return (
-    <div className={cn(
-      'flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px]',
-      tc.status === 'running'
-        ? 'bg-blue-500/5 border-blue-500/20'
-        : tc.status === 'completed'
-        ? 'bg-emerald-500/5 border-emerald-500/20'
-        : 'bg-red-500/5 border-red-500/20',
-    )}>
-      <span className={cn(
-        tc.status === 'running' ? 'text-blue-500' :
-        tc.status === 'completed' ? 'text-emerald-500' : 'text-red-500',
-      )}>
-        {tc.status === 'running'
-          ? <Loader2 size={9} className="animate-spin" />
-          : tc.status === 'completed'
-          ? <CheckCircle size={9} />
-          : <XCircle size={9} />}
-      </span>
-      <span className={cn(
-        'text-[var(--text-muted)]',
-        tc.status === 'running' ? 'text-blue-600 dark:text-blue-400' :
-        tc.status === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500',
-      )}>
-        <ToolIcon name={tc.name} size={9} />
-      </span>
-      <span className="font-mono font-medium text-[var(--text-main)]">{label}</span>
-      {summary && (
-        <span className="text-[var(--text-muted)] truncate flex-1 max-w-[200px]">{summary}</span>
+    <div className="space-y-2">
+      {/* Agent avatar + label */}
+      <div className="flex items-center gap-2">
+        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+          <Sparkles size={11} className="text-white" />
+        </div>
+        <span className="text-[12px] font-semibold text-[var(--text-main)]">Agent</span>
+        <Loader2 size={11} className="text-purple-500 animate-spin ml-1" />
+      </div>
+
+      {/* Live action history */}
+      {hasActions && (
+        <div className="ml-8 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] overflow-hidden">
+          {/* Thinking row — live */}
+          {thinking.length > 0 && (
+            <div className="flex items-center gap-2.5 px-3 py-2 border-b border-[var(--border-color)] last:border-b-0">
+              <Brain size={12} className="text-purple-500 flex-shrink-0 animate-pulse" />
+              <span className="text-[12px] text-[var(--text-muted)]">
+                正在思考…
+              </span>
+              <span className="ml-auto text-[10px] text-purple-400 font-medium">
+                {thinking.length} 步
+              </span>
+            </div>
+          )}
+          {/* Tool call rows */}
+          {toolCalls.map((tc, i) => (
+            <LiveActionRow key={i} tc={tc} />
+          ))}
+          {/* Code synced */}
+          {codeCount > 0 && (
+            <div className="flex items-center gap-2.5 px-3 py-2 border-t border-[var(--border-color)] bg-emerald-500/5">
+              <CheckCircle size={12} className="text-emerald-500 flex-shrink-0" />
+              <span className="text-[12px] text-emerald-600 dark:text-emerald-400 font-medium">
+                已写入 {codeCount} 个 .sysml 文件
+              </span>
+            </div>
+          )}
+        </div>
       )}
+
+      {/* Streaming response text */}
+      {content ? (
+        <div className="ml-8">
+          <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
+            <Markdown components={mdComponents}>{content}</Markdown>
+            <span className="inline-block w-1.5 h-3.5 bg-purple-500 animate-pulse ml-0.5 -mb-0.5 rounded-sm" />
+          </div>
+        </div>
+      ) : !hasActions ? (
+        <div className="ml-8 text-[12px] text-[var(--text-muted)]">
+          正在生成…
+        </div>
+      ) : null}
     </div>
   );
 };
 
 /* ------------------------------------------------------------------ */
-/*  MessageBubble — renders a single completed message                */
+/*  LiveActionRow — single action row during streaming               */
+/* ------------------------------------------------------------------ */
+
+const LiveActionRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
+  const desc = getActionDescription(tc.name, tc.input);
+  const isRunning = tc.status === 'running';
+  const isError = tc.status === 'error';
+
+  return (
+    <div className={cn(
+      'flex items-center gap-2.5 px-3 py-2 border-b border-[var(--border-color)] last:border-b-0',
+      isError && 'bg-red-500/5',
+    )}>
+      <span className={cn(
+        'flex-shrink-0',
+        isRunning ? 'text-blue-500' : isError ? 'text-red-500' : 'text-emerald-500',
+      )}>
+        {isRunning
+          ? <Loader2 size={12} className="animate-spin" />
+          : isError
+          ? <XCircle size={12} />
+          : <CheckCircle size={12} />}
+      </span>
+      <span className={cn(
+        'flex-shrink-0',
+        isRunning ? 'text-[var(--text-muted)]' : isError ? 'text-red-400' : 'text-[var(--text-muted)]',
+      )}>
+        <ToolIcon name={tc.name} size={11} />
+      </span>
+      <span className={cn(
+        'text-[12px]',
+        isRunning ? 'text-[var(--text-main)]' : isError ? 'text-red-500' : 'text-[var(--text-main)]',
+      )}>
+        {desc}
+      </span>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/*  MessageBubble — Google AI Studio-style message rendering         */
 /* ------------------------------------------------------------------ */
 
 const MessageBubble: React.FC<{
   msg: ChatMessage;
   mdComponents: Record<string, React.FC<any>>;
 }> = React.memo(({ msg, mdComponents }) => {
+
+  /* ── User message ── */
+  if (msg.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-2xl rounded-tr-sm px-3.5 py-2.5 bg-blue-500/10 border border-blue-500/15">
+          <p className="text-[13px] text-[var(--text-main)] whitespace-pre-wrap break-words leading-relaxed">
+            {msg.content}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── System message ── */
+  if (msg.role === 'system') {
+    return (
+      <div className="flex justify-center">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--border-color)]/60 text-[11px] text-[var(--text-muted)]">
+          <Terminal size={10} />
+          <span>{msg.content}</span>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Error message ── */
+  if (msg.role === 'error') {
+    return (
+      <div className="flex gap-2.5">
+        <div className="w-6 h-6 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <AlertCircle size={12} className="text-red-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[12px] font-semibold text-red-500">错误</span>
+          </div>
+          <div className="rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2">
+            <p className="text-[12px] text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
+              {msg.content}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Assistant message — Google AI Studio style ── */
+  const hasActions = msg.thinkingSteps.length > 0 || msg.toolCalls.length > 0;
+
   return (
-    <div>
-      {/* Thinking (collapsed details) */}
-      {msg.thinkingSteps.length > 0 && (
-        <ThinkingBlock steps={msg.thinkingSteps} />
-      )}
+    <div className="flex gap-2.5">
+      {/* Avatar */}
+      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Sparkles size={11} className="text-white" />
+      </div>
 
-      {/* Tool calls */}
-      {msg.toolCalls.length > 0 && (
-        <div className="mb-1.5 space-y-0.5">
-          {msg.toolCalls.map((tc, ti) => (
-            <ToolCallRow key={ti} tc={tc} />
-          ))}
-        </div>
-      )}
-
-      <div className={cn(
-        'rounded-lg p-3',
-        msg.role === 'user' ? 'bg-blue-500/10 border border-blue-500/20 ml-6'
-          : msg.role === 'error' ? 'bg-red-500/10 border border-red-500/20'
-          : msg.role === 'system' ? 'bg-slate-500/5 border border-[var(--border-color)]'
-          : 'bg-[var(--bg-main)] border border-[var(--border-color)]',
-      )}>
-        {/* Role label */}
-        <div className="flex items-center gap-1.5 mb-1">
-          {msg.role === 'user' ? (
-            <span className="text-[10px] font-bold text-blue-500 uppercase">You</span>
-          ) : msg.role === 'error' ? (
-            <><AlertCircle size={9} className="text-red-500" /><span className="text-[10px] font-bold text-red-500 uppercase">Error</span></>
-          ) : msg.role === 'system' ? (
-            <><Terminal size={9} className="text-[var(--text-muted)]" /><span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">System</span></>
-          ) : (
-            <>
-              <Sparkles size={9} className="text-purple-500" />
-              <span className="text-[10px] font-bold text-purple-500 uppercase">{msg.provider || 'free-code'}</span>
-              <div className="flex items-center gap-1.5 ml-auto">
-                {msg.codesSynced > 0 && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium flex items-center gap-0.5">
-                    <CheckCircle size={7} /> {msg.codesSynced} 已同步
-                  </span>
-                )}
-                {msg.durationMs !== undefined && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-slate-500/10 text-[var(--text-muted)] border border-[var(--border-color)] font-medium flex items-center gap-0.5">
-                    <Clock size={7} /> {(msg.durationMs / 1000).toFixed(1)}s
-                  </span>
-                )}
-              </div>
-            </>
+      <div className="flex-1 min-w-0 space-y-2">
+        {/* Header row */}
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] font-semibold text-[var(--text-main)]">Agent</span>
+          {msg.durationMs !== undefined && (
+            <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+              <Clock size={9} />
+              {(msg.durationMs / 1000).toFixed(1)}s
+            </span>
+          )}
+          {msg.codesSynced > 0 && (
+            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+              <CheckCircle size={9} />
+              {msg.codesSynced} 文件已同步
+            </span>
           )}
         </div>
 
-        {/* Content */}
-        <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-          {msg.role === 'user' || msg.role === 'system' || msg.role === 'error' ? (
-            <span className="whitespace-pre-wrap break-words">{msg.content}</span>
-          ) : (
+        {/* Action history block */}
+        {hasActions && (
+          <ActionHistoryBlock
+            thinkingSteps={msg.thinkingSteps}
+            toolCalls={msg.toolCalls}
+            thinkingDurationMs={msg.thinkingDurationMs}
+          />
+        )}
+
+        {/* Response text */}
+        {msg.content.trim() && (
+          <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
             <Markdown components={mdComponents}>{msg.content}</Markdown>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -817,29 +1140,40 @@ const MessageBubble: React.FC<{
 MessageBubble.displayName = 'MessageBubble';
 
 /* ------------------------------------------------------------------ */
-/*  ThinkingBlock — collapsible thinking steps                       */
+/*  ActionHistoryBlock — collapsible action history (AI Studio style) */
 /* ------------------------------------------------------------------ */
 
-const ThinkingBlock: React.FC<{ steps: ThinkingStep[] }> = ({ steps }) => {
-  const [open, setOpen] = useState(false);
+const ActionHistoryBlock: React.FC<{
+  thinkingSteps: ThinkingStep[];
+  toolCalls: ToolCall[];
+  thinkingDurationMs?: number;
+}> = ({ thinkingSteps, toolCalls, thinkingDurationMs }) => {
+  const [open, setOpen] = useState(true);
+  const totalActions = (thinkingSteps.length > 0 ? 1 : 0) + toolCalls.length;
 
   return (
-    <div className="mb-1.5 rounded-md border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] overflow-hidden">
+      {/* Collapse toggle */}
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--border-color)]/40 transition-colors text-left"
       >
-        <Brain size={9} />
-        <span className="font-medium">思考过程 ({steps.length} 步)</span>
-        <span className="ml-auto">{open ? <ChevronDown size={9} /> : <ChevronRight size={9} />}</span>
+        <Play size={10} className="text-[var(--text-muted)] flex-shrink-0" />
+        <span className="text-[11px] font-semibold text-[var(--text-muted)] flex-1">
+          Action history · {totalActions} 步
+        </span>
+        {open ? <ChevronDown size={12} className="text-[var(--text-muted)]" /> : <ChevronRight size={12} className="text-[var(--text-muted)]" />}
       </button>
+
       {open && (
-        <div className="px-3 pb-2 space-y-1 border-t border-purple-500/10">
-          {steps.map((step, si) => (
-            <div key={si} className="flex items-start gap-1.5 pt-1 text-[11px] text-[var(--text-muted)]">
-              <Terminal size={7} className="text-purple-400 mt-0.5 flex-shrink-0" />
-              <span className="leading-relaxed">{step.content}</span>
-            </div>
+        <div className="border-t border-[var(--border-color)]">
+          {/* Thinking row */}
+          {thinkingSteps.length > 0 && (
+            <ThoughtRow steps={thinkingSteps} durationMs={thinkingDurationMs} />
+          )}
+          {/* Tool call rows */}
+          {toolCalls.map((tc, i) => (
+            <CompletedActionRow key={i} tc={tc} />
           ))}
         </div>
       )}
@@ -848,48 +1182,87 @@ const ThinkingBlock: React.FC<{ steps: ThinkingStep[] }> = ({ steps }) => {
 };
 
 /* ------------------------------------------------------------------ */
-/*  ToolCallRow — single completed tool call with expandable result  */
+/*  ThoughtRow — "Thought for X.X seconds" expandable row            */
 /* ------------------------------------------------------------------ */
 
-const ToolCallRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
-  const [expanded, setExpanded] = useState(false);
-  const summary = getToolSummary(tc.name, tc.input);
-  const label = getToolLabel(tc.name);
+const ThoughtRow: React.FC<{ steps: ThinkingStep[]; durationMs?: number }> = ({
+  steps,
+  durationMs,
+}) => {
+  const [open, setOpen] = useState(false);
+
+  const durationLabel = durationMs !== undefined
+    ? `${(durationMs / 1000).toFixed(1)} 秒`
+    : `${steps.length} 步`;
+
+  return (
+    <div className="border-b border-[var(--border-color)] last:border-b-0">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-purple-500/5 transition-colors text-left"
+      >
+        <Brain size={13} className="text-purple-500 flex-shrink-0" />
+        <span className="text-[12px] text-[var(--text-main)] flex-1">
+          Thought for <span className="font-semibold">{durationLabel}</span>
+        </span>
+        {open ? <ChevronDown size={11} className="text-[var(--text-muted)]" /> : <ChevronRight size={11} className="text-[var(--text-muted)]" />}
+      </button>
+      {open && (
+        <div className="px-4 pb-3 pt-1 bg-purple-500/3 border-t border-purple-500/10 space-y-1.5 max-h-[200px] overflow-y-auto custom-scrollbar">
+          {steps.map((step, i) => (
+            <p key={i} className="text-[11px] text-[var(--text-muted)] leading-relaxed whitespace-pre-wrap">
+              {step.content}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/*  CompletedActionRow — single completed tool call with expandable  */
+/* ------------------------------------------------------------------ */
+
+const CompletedActionRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
+  const [open, setOpen] = useState(false);
+  const desc = getActionDescription(tc.name, tc.input);
   const hasResult = Boolean(tc.result?.trim());
+  const isError = tc.status === 'error';
 
   return (
     <div className={cn(
-      'rounded-md border text-[11px] overflow-hidden',
-      tc.status === 'completed' ? 'border-[var(--border-color)] bg-[var(--bg-main)]' : 'border-red-500/20 bg-red-500/5',
+      'border-b border-[var(--border-color)] last:border-b-0',
+      isError && 'bg-red-500/5',
     )}>
       <button
-        onClick={() => hasResult && setExpanded(v => !v)}
+        onClick={() => hasResult && setOpen(v => !v)}
         className={cn(
-          'w-full flex items-center gap-1.5 px-2 py-1 transition-colors',
-          hasResult ? 'hover:bg-[var(--border-color)]/50 cursor-pointer' : 'cursor-default',
+          'w-full flex items-center gap-2.5 px-3 py-2.5 transition-colors text-left',
+          hasResult ? 'hover:bg-[var(--border-color)]/40 cursor-pointer' : 'cursor-default',
         )}
       >
-        <span className={tc.status === 'completed' ? 'text-emerald-500' : 'text-red-500'}>
-          {tc.status === 'completed'
-            ? <CheckCircle size={8} />
-            : <XCircle size={8} />}
+        <span className={cn('flex-shrink-0', isError ? 'text-red-500' : 'text-emerald-500')}>
+          {isError ? <XCircle size={13} /> : <CheckCircle size={13} />}
         </span>
-        <span className="text-[var(--text-muted)]">
-          <ToolIcon name={tc.name} size={8} />
+        <span className={cn('flex-shrink-0 text-[var(--text-muted)]')}>
+          <ToolIcon name={tc.name} size={12} />
         </span>
-        <span className="font-mono font-medium text-[var(--text-main)]">{label}</span>
-        {summary && (
-          <span className="text-[var(--text-muted)] truncate flex-1 max-w-[200px] text-left">{summary}</span>
-        )}
+        <span className={cn(
+          'text-[12px] flex-1 min-w-0',
+          isError ? 'text-red-600 dark:text-red-400' : 'text-[var(--text-main)]',
+        )}>
+          {desc}
+        </span>
         {hasResult && (
-          <span className="ml-auto text-[var(--text-muted)]">
-            {expanded ? <ChevronDown size={8} /> : <ChevronRight size={8} />}
+          <span className="text-[var(--text-muted)] flex-shrink-0">
+            {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </span>
         )}
       </button>
-      {expanded && hasResult && (
-        <div className="px-3 pb-2 pt-1 border-t border-[var(--border-color)] bg-slate-50 dark:bg-slate-900/50">
-          <pre className="text-[11px] font-mono text-[var(--text-muted)] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto">
+      {open && hasResult && (
+        <div className="px-4 pb-3 pt-1 border-t border-[var(--border-color)] bg-slate-50 dark:bg-slate-900/40">
+          <pre className="text-[11px] font-mono text-[var(--text-muted)] whitespace-pre-wrap break-words max-h-[150px] overflow-y-auto custom-scrollbar leading-relaxed">
             {tc.result}
           </pre>
         </div>
