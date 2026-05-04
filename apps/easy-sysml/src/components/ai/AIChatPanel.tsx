@@ -6,7 +6,7 @@
  * - Auto-applies SysML code to editor when the agent writes a .sysml file
  * - Shows action history inline: "Thought for X.X seconds", "Read file", "Edited file", etc.
  * - Supports slash commands: /code, /help, /clear
- * - Maintains multiple named sessions with localStorage persistence
+ * - Maintains multiple named sessions backed by the sysml-server backend
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Markdown from 'react-markdown';
@@ -19,54 +19,16 @@ import {
   StopCircle, Zap, Play, ArrowUp, History, MessageSquarePlus,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import {
+  useChatSessions,
+  type ChatMessage,
+  type ThinkingStep,
+  type ToolCall,
+} from '../../hooks/useChatSessions';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
-
-interface ThinkingStep {
-  content: string;
-  timestamp: number;
-}
-
-interface ToolCall {
-  /** free-code tool_use id — used for matching running → completed */
-  id?: string;
-  name: string;
-  /** Parsed input args from the agent */
-  input?: Record<string, unknown>;
-  status: 'running' | 'completed' | 'error';
-  result?: string;
-  timestamp: number;
-}
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'error' | 'system';
-  content: string;
-  provider?: string;
-  thinkingSteps: ThinkingStep[];
-  toolCalls: ToolCall[];
-  /** Number of SysML code blocks auto-synced to editor */
-  codesSynced: number;
-  /** Duration from free-code result message */
-  durationMs?: number;
-  /** How long the model spent thinking (ms) before first tool/response */
-  thinkingDurationMs?: number;
-  timestamp: number;
-}
-
-/** A chat session — stored in localStorage for persistence across page reloads */
-interface StoredSession {
-  id: string;
-  /** Derived from the first user message */
-  title: string;
-  messages: ChatMessage[];
-  /** sysml-server conversation label; kept in sync so the server can log turns
-   *  against a stable ID even though a fresh free-code session is created per turn */
-  conversationId: string | null;
-  createdAt: number;
-}
 
 interface AIChatPanelProps {
   onApplyCode: (code: string) => void;
@@ -192,20 +154,11 @@ function getBasename(filePath: string): string {
 const THINKING_DURATION_ESTIMATE_RATIO = 0.3;
 /** Cap on estimated thinking duration in ms */
 const MAX_THINKING_DURATION_MS = 10_000;
-/** Maximum characters used for the session title derived from the first user message */
-const MAX_TITLE_LENGTH = 40;
-/** Maximum number of sessions to persist in localStorage */
-const MAX_STORED_SESSIONS = 50;
 const AI_API_KEY_STORAGE_KEY = 'easy-sysml-ai-api-key';
 
 let _nextId = 0;
 function makeId(): string {
   return `msg-${Date.now()}-${_nextId++}`;
-}
-
-let _nextSessionId = 0;
-function makeSessionId(): string {
-  return `sess-${Date.now()}-${_nextSessionId++}`;
 }
 
 function formatRelativeTime(ts: number): string {
@@ -217,44 +170,16 @@ function formatRelativeTime(ts: number): string {
 }
 
 function formatDurationLabel(durationMs: number | undefined): string {
-  if (durationMs === undefined) {
-    return '0.0 秒';
-  }
-
+  if (durationMs === undefined) return '0.0 秒';
   return `${(durationMs / 1000).toFixed(1)} 秒`;
 }
 
 function getStepDurationMs(steps: ThinkingStep[]): number | undefined {
-  if (steps.length === 0) {
-    return undefined;
-  }
-
+  if (steps.length === 0) return undefined;
   const firstTimestamp = steps[0]?.timestamp;
   const lastTimestamp = steps[steps.length - 1]?.timestamp;
-  if (firstTimestamp === undefined || lastTimestamp === undefined) {
-    return undefined;
-  }
-
+  if (firstTimestamp === undefined || lastTimestamp === undefined) return undefined;
   return Math.max(100, lastTimestamp - firstTimestamp);
-}
-
-const SESSIONS_STORAGE_KEY = 'ai-chat-sessions-v1';
-
-function loadSessions(): StoredSession[] {
-  try {
-    const raw = localStorage.getItem(SESSIONS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as StoredSession[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSessions(sessions: StoredSession[]): void {
-  try {
-    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.slice(0, MAX_STORED_SESSIONS)));
-  } catch {
-    // ignore quota errors
-  }
 }
 
 function loadStoredApiKey(): string {
@@ -344,7 +269,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   currentCode,
   projectId,
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const chatSessions = useChatSessions(projectId);
+
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCommands, setShowCommands] = useState(false);
@@ -353,13 +279,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [apiKey, setApiKey] = useState(loadStoredApiKey);
   const [apiKeyDraft, setApiKeyDraft] = useState(loadStoredApiKey);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
-
-  // Conversation state — sent to sysml-server so it can reuse the convId label
-  const [conversationId, setConversationId] = useState<string | null>(null);
-
-  // Sessions management
-  const [sessions, setSessions] = useState<StoredSession[]>(loadSessions);
-  const [activeSessionId, setActiveSessionId] = useState<string>(makeSessionId);
   const [showSessions, setShowSessions] = useState(false);
 
   // Streaming state
@@ -376,24 +295,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  /* ---------- Auto-save current session whenever messages change ---------- */
+  // Keep a snapshot of current messages inside async SSE callbacks
+  // (avoids stale closure issues when building the final message list)
+  const messagesSnapshotRef = useRef<ChatMessage[]>(chatSessions.messages);
   useEffect(() => {
-    if (messages.length === 0) return;
-    const firstUserMsg = messages.find(m => m.role === 'user');
-    const title = firstUserMsg
-      ? firstUserMsg.content.slice(0, MAX_TITLE_LENGTH) + (firstUserMsg.content.length > MAX_TITLE_LENGTH ? '…' : '')
-      : '新对话';
-    setSessions(prev => {
-      const exists = prev.find(s => s.id === activeSessionId);
-      const updated: StoredSession[] = exists
-        ? prev.map(s => s.id === activeSessionId
-            ? { ...s, title, messages, conversationId }
-            : s)
-        : [{ id: activeSessionId, title, messages, conversationId, createdAt: Date.now() }, ...prev];
-      saveSessions(updated);
-      return updated;
-    });
-  }, [messages, conversationId, activeSessionId]);
+    messagesSnapshotRef.current = chatSessions.messages;
+  }, [chatSessions.messages]);
 
   /* ---------- Check backend status on mount ---------- */
   useEffect(() => {
@@ -420,7 +327,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, loading, streamingContent, streamingThinking, streamingToolCalls]);
+  }, [chatSessions.messages, loading, streamingContent, streamingThinking, streamingToolCalls]);
 
   /* ---------- Slash command handling ---------- */
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -439,14 +346,14 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             content: `📎 已附加当前编辑器代码 (${currentCode.split('\n').length} 行) 作为上下文`,
             thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
           };
-          setMessages(prev => [...prev, sysMsg]);
+          chatSessions.setMessages([...chatSessions.messages, sysMsg]);
         } else {
           const sysMsg: ChatMessage = {
             id: makeId(), role: 'system',
             content: '⚠️ 编辑器中没有代码',
             thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
           };
-          setMessages(prev => [...prev, sysMsg]);
+          chatSessions.setMessages([...chatSessions.messages, sysMsg]);
         }
         setInput('');
         break;
@@ -458,17 +365,17 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           content: `📋 可用命令:\n${helpText}`,
           thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
         };
-        setMessages(prev => [...prev, sysMsg]);
+        chatSessions.setMessages([...chatSessions.messages, sysMsg]);
         setInput('');
         break;
       }
       case '/clear':
-        setMessages([]);
-        setConversationId(null);
+        chatSessions.setMessages([]);
+        chatSessions.setConversationId(null);
         setInput('');
         break;
     }
-  }, [currentCode]);
+  }, [currentCode, chatSessions]);
 
   const handleSaveApiKey = useCallback(() => {
     const nextKey = apiKeyDraft.trim();
@@ -476,7 +383,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setApiKeyError('请输入有效的 API key');
       return;
     }
-
     persistApiKey(nextKey);
     setApiKey(nextKey);
     setApiKeyDraft(nextKey);
@@ -515,7 +421,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       id: makeId(), role: 'user', content: userText,
       thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
     };
-    setMessages(prev => [...prev, userMsg]);
+
+    // Snapshot current messages + new user message for this turn
+    const turnStartMessages = [...messagesSnapshotRef.current, userMsg];
+    messagesSnapshotRef.current = turnStartMessages;
+    chatSessions.setMessages(turnStartMessages);
+
     setLoading(true);
     setStreamingContent('');
     setStreamingThinking([]);
@@ -532,12 +443,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     let contentAcc = '';
     let codeCount = 0;
     let durationMs: number | undefined;
+    // Track messages accumulated for this turn (errors may be added during streaming)
+    let turnMessages = [...turnStartMessages];
 
     try {
-      const history = messages
+      const history = turnStartMessages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-      history.push({ role: 'user', content: userText });
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -548,7 +460,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         body: JSON.stringify({
           messages: history,
           currentCode: currentCode?.trim() || undefined,
-          conversationId: conversationId || undefined,
+          conversationId: chatSessions.conversationId || undefined,
           autoApply: true,
           projectId,
         }),
@@ -587,7 +499,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               switch (currentEvent) {
                 case 'session': {
                   if (data.conversationId) {
-                    setConversationId(data.conversationId);
+                    chatSessions.setConversationId(data.conversationId);
                   }
                   break;
                 }
@@ -602,7 +514,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   break;
                 }
                 case 'delta': {
-                  // Mark end of thinking when first content arrives
                   if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
                     thinkingEndTsRef.current = Date.now();
                   }
@@ -619,7 +530,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   break;
                 }
                 case 'tool_call': {
-                  // Mark end of thinking when first tool call arrives
                   if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
                     thinkingEndTsRef.current = Date.now();
                   }
@@ -631,7 +541,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     result: data.result,
                     timestamp: Date.now(),
                   };
-                  // Update existing running entry by ID, or append
                   let existingIdx = -1;
                   if (data.id && data.status !== 'running') {
                     for (let i = toolCallAcc.length - 1; i >= 0; i--) {
@@ -661,7 +570,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
                     codesSynced: codeCount, timestamp: Date.now(),
                   };
-                  setMessages(prev => [...prev, errorMsg]);
+                  turnMessages = [...turnMessages, errorMsg];
+                  chatSessions.setMessages(turnMessages);
                   break;
                 }
                 case 'done': {
@@ -679,7 +589,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                       codesSynced: codeCount, durationMs, thinkingDurationMs,
                       timestamp: Date.now(),
                     };
-                    setMessages(prev => [...prev, assistantMsg]);
+                    turnMessages = [...turnMessages, assistantMsg];
+                    chatSessions.setMessages(turnMessages);
                   }
                   break;
                 }
@@ -698,7 +609,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         id: makeId(), role: 'error', content: message,
         thinkingSteps: [], toolCalls: [], codesSynced: 0, timestamp: Date.now(),
       };
-      setMessages(prev => [...prev, errorMsg]);
+      turnMessages = [...turnMessages, errorMsg];
+      chatSessions.setMessages(turnMessages);
     } finally {
       setLoading(false);
       setStreamingContent('');
@@ -707,55 +619,43 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setStreamingCodeCount(0);
       abortRef.current = null;
     }
-  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, conversationId, currentCode, executeCommand, input, loading, messages, onApplyCode, projectId]);
+  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, chatSessions, currentCode, executeCommand, input, loading, onApplyCode, projectId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); }
   }, [handleSend]);
 
   const handleNewChat = useCallback(() => {
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
-    setMessages([]);
+    chatSessions.newSession();
     setInput('');
-    setConversationId(null);
     setStreamingContent('');
     setStreamingThinking([]);
     setStreamingToolCalls([]);
     setStreamingCodeCount(0);
-    setActiveSessionId(makeSessionId());
     setShowSessions(false);
-  }, []);
+  }, [chatSessions]);
 
-  const switchToSession = useCallback((session: StoredSession) => {
+  const switchToSession = useCallback((sessionId: string) => {
     if (loading) return;
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
-    setMessages(session.messages);
-    setConversationId(session.conversationId);
-    setActiveSessionId(session.id);
+    chatSessions.switchSession(sessionId);
     setInput('');
     setStreamingContent('');
     setStreamingThinking([]);
     setStreamingToolCalls([]);
     setStreamingCodeCount(0);
     setShowSessions(false);
-  }, [loading]);
+  }, [loading, chatSessions]);
 
   const deleteSession = useCallback((sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setSessions(prev => {
-      const updated = prev.filter(s => s.id !== sessionId);
-      saveSessions(updated);
-      return updated;
-    });
-    if (sessionId === activeSessionId) {
-      // Start fresh when deleting the active session
-      setMessages([]);
-      setConversationId(null);
-      setActiveSessionId(makeSessionId());
-    }
-  }, [activeSessionId]);
+    chatSessions.deleteSession(sessionId);
+  }, [chatSessions]);
 
   const mdComponents = useMemo(() => markdownComponents, []);
+
+  const { messages, sessions, activeSessionId, conversationId } = chatSessions;
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                          */
@@ -823,7 +723,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             sessions.map(session => (
               <div
                 key={session.id}
-                onClick={() => switchToSession(session)}
+                onClick={() => switchToSession(session.id)}
                 className={cn(
                   'group flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors border-b border-[var(--border-color)]/50 last:border-b-0',
                   session.id === activeSessionId
@@ -926,7 +826,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider px-1 mb-1">快速开始</div>
               {QUICK_PROMPTS.map((qp, i) => (
-                <button key={i} onClick={() => handleSend(qp.prompt)} disabled={loading || !chatEnabled}
+                <button key={i} onClick={() => { void handleSend(qp.prompt); }} disabled={loading || !chatEnabled}
                   className="w-full text-left p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group disabled:opacity-50">
                   <div className="flex items-center gap-2">
                     <div className="w-5 h-5 rounded-md bg-purple-500/10 flex items-center justify-center flex-shrink-0">
@@ -1030,7 +930,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               </button>
             ) : (
               <button
-                onClick={() => handleSend()}
+                onClick={() => { void handleSend(); }}
                 disabled={!input.trim() || !chatEnabled}
                 className={cn(
                   'w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0',

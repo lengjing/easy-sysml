@@ -3,8 +3,9 @@
  *
  * Express server providing:
  *   - Project management (CRUD)
- *   - SysML file management (CRUD, linked to projects)
- *   - Session management (linked to free-code server sessions)
+ *   - SysML file management (filesystem-based, no DB)
+ *   - Agent session management (linked to free-code server sessions)
+ *   - Chat session management (stored in DB with message history)
  *   - Chat/streaming endpoint (SSE, proxies to free-code agent)
  *
  * API:
@@ -16,16 +17,24 @@
  *
  *   GET    /api/projects/:projectId/files
  *   POST   /api/projects/:projectId/files
- *   GET    /api/projects/:projectId/files/:fileId
- *   PUT    /api/projects/:projectId/files/:fileId
- *   DELETE /api/projects/:projectId/files/:fileId
+ *   GET    /api/projects/:projectId/files/:nodeId
+ *   PUT    /api/projects/:projectId/files/:nodeId
+ *   DELETE /api/projects/:projectId/files/:nodeId
  *
  *   GET    /api/projects/:projectId/sessions
  *   POST   /api/projects/:projectId/sessions
  *   GET    /api/projects/:projectId/sessions/:sessionId
  *   DELETE /api/projects/:projectId/sessions/:sessionId
  *
+ *   GET    /api/projects/:projectId/chat-sessions
+ *   POST   /api/projects/:projectId/chat-sessions
+ *   GET    /api/projects/:projectId/chat-sessions/:sessionId
+ *   PUT    /api/projects/:projectId/chat-sessions/:sessionId
+ *   DELETE /api/projects/:projectId/chat-sessions/:sessionId
+ *   PUT    /api/projects/:projectId/chat-sessions/:sessionId/messages
+ *
  *   POST   /api/sessions/:sessionId/chat   (SSE stream)
+ *   POST   /api/chat                       (SSE stream, direct)
  *
  *   GET    /api/status
  */
@@ -38,7 +47,8 @@ import { fileURLToPath } from 'node:url';
 import { initDb } from './db.js';
 import { projectsRouter } from './routes/projects.js';
 import { filesRouter } from './routes/files.js';
-import { sessionsRouter } from './routes/sessions.js';
+import { agentSessionsRouter } from './routes/agentSessions.js';
+import { chatSessionsRouter } from './routes/chatSessions.js';
 import { chatRouter } from './routes/chat.js';
 import { directChatRouter } from './routes/directChat.js';
 import { adminAuthRouter } from './routes/adminAuth.js';
@@ -73,7 +83,8 @@ app.use(express.json({ limit: '2mb' }));
 
 app.use('/api/projects', projectsRouter);
 app.use('/api/projects/:projectId/files', filesRouter);
-app.use('/api/projects/:projectId/sessions', sessionsRouter);
+app.use('/api/projects/:projectId/sessions', agentSessionsRouter);
+app.use('/api/projects/:projectId/chat-sessions', chatSessionsRouter);
 app.use('/api/admin', adminAuthRouter);
 app.use('/api/ai/keys', aiKeysRouter);
 app.use('/api/sessions/:sessionId/chat', chatRouter);
@@ -88,8 +99,7 @@ app.get('/api/status', (_req, res) => {
   res.json({
     ok: true,
     server: 'sysml-server',
-    version: '0.1.0',
-    // configured is always true — free-code reachability is checked at chat time
+    version: '0.2.0',
     configured: true,
     providerLabel: 'free-code',
     free_code_server_url: freeCodeUrl,

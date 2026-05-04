@@ -2,9 +2,13 @@
  * SQLite Database Setup
  *
  * Tables:
- *   projects      — SysML project records
- *   sysml_files   — SysML source files linked to projects
- *   sessions      — free-code agent sessions linked to projects
+ *   projects        — SysML project records
+ *   agent_sessions  — free-code agent sessions linked to projects
+ *   chat_sessions   — chat UI sessions with message history (JSON)
+ *   ai_api_keys     — API key management with usage tracking
+ *
+ * Note: SysML source files are stored on the filesystem (project work_dir),
+ * NOT in the database. The files route reads/writes them directly from disk.
  */
 
 import Database from 'better-sqlite3';
@@ -29,7 +33,33 @@ export function initDb(dbPath: string): Database.Database {
   return _db;
 }
 
+function getTableNames(db: Database.Database): Set<string> {
+  const rows = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+    .all() as Array<{ name: string }>;
+  return new Set(rows.map(r => r.name));
+}
+
+function getColumnNames(db: Database.Database, table: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return new Set(rows.map(r => r.name));
+}
+
 function migrate(db: Database.Database): void {
+  const tables = getTableNames(db);
+
+  // ── Legacy migrations ──────────────────────────────────────────────────
+  // Rename `sessions` → `agent_sessions` (clearer naming)
+  if (tables.has('sessions') && !tables.has('agent_sessions')) {
+    db.exec('ALTER TABLE sessions RENAME TO agent_sessions');
+  }
+
+  // Drop old sysml_files table — files are now on the filesystem
+  if (tables.has('sysml_files')) {
+    db.exec('DROP TABLE sysml_files');
+  }
+
+  // ── Core schema ────────────────────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id          TEXT PRIMARY KEY,
@@ -40,18 +70,7 @@ function migrate(db: Database.Database): void {
       updated_at  INTEGER NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS sysml_files (
-      id          TEXT PRIMARY KEY,
-      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      name        TEXT NOT NULL,
-      path        TEXT NOT NULL,
-      content     TEXT NOT NULL DEFAULT '',
-      created_at  INTEGER NOT NULL,
-      updated_at  INTEGER NOT NULL,
-      UNIQUE(project_id, path)
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
+    CREATE TABLE IF NOT EXISTS agent_sessions (
       id                   TEXT PRIMARY KEY,
       project_id           TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       free_code_session_id TEXT,
@@ -60,6 +79,16 @@ function migrate(db: Database.Database): void {
       status               TEXT NOT NULL DEFAULT 'active',
       created_at           INTEGER NOT NULL,
       updated_at           INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id              TEXT PRIMARY KEY,
+      project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      title           TEXT NOT NULL DEFAULT '新对话',
+      conversation_id TEXT,
+      messages_json   TEXT NOT NULL DEFAULT '[]',
+      created_at      INTEGER NOT NULL,
+      updated_at      INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS ai_api_keys (
@@ -81,17 +110,14 @@ function migrate(db: Database.Database): void {
     );
   `);
 
-  const projectColumns = db
-    .prepare("PRAGMA table_info(projects)")
-    .all() as Array<{ name: string }>;
-  if (!projectColumns.some(column => column.name === 'work_dir')) {
+  // ── Column-level migrations ────────────────────────────────────────────
+  const projectCols = getColumnNames(db, 'projects');
+  if (!projectCols.has('work_dir')) {
     db.exec("ALTER TABLE projects ADD COLUMN work_dir TEXT NOT NULL DEFAULT ''");
   }
 
-  const aiKeyColumns = db
-    .prepare("PRAGMA table_info(ai_api_keys)")
-    .all() as Array<{ name: string }>;
-  if (!aiKeyColumns.some(column => column.name === 'balance_usd')) {
+  const aiKeyCols = getColumnNames(db, 'ai_api_keys');
+  if (!aiKeyCols.has('balance_usd')) {
     db.exec('ALTER TABLE ai_api_keys ADD COLUMN balance_usd REAL');
   }
 }

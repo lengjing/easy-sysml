@@ -3,6 +3,10 @@
  *
  * React hook that wraps the VirtualFileSystem singleton,
  * providing reactive state for the file tree and open tabs.
+ *
+ * When a `projectId` is provided the file tree is loaded from the backend
+ * and all mutations (create, update, rename, delete) are synced back.
+ * Without a `projectId` the hook falls back to local IndexedDB storage.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -11,6 +15,7 @@ import {
   type VirtualFileSystem,
 } from '../lib/virtual-fs';
 import {
+  createProjectDirectory,
   createProjectFile,
   deleteProjectFile,
   listProjectFiles,
@@ -60,72 +65,53 @@ export interface UseFileSystemReturn {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Hook                                                              */
+/*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
 
 const REMOTE_SAVE_DELAY_MS = 400;
 
-function buildDirectoryId(path: string): string {
-  return `dir:${path}`;
-}
-
-function buildNodesFromRemoteFiles(files: ServerFileRecord[]): FileNode[] {
-  const directories = new Map<string, FileNode>();
-  const nodes: FileNode[] = [];
-
-  const ensureDirectory = (pathSegments: string[]): string | null => {
-    if (pathSegments.length === 0) {
-      return null;
+/**
+ * Build VFS nodes from the server filesystem response.
+ *
+ * The server returns both files and directories. Each node already has
+ * an `id` (base64url of its path) and a `type` field, so we don't need
+ * to infer directory structure from file paths anymore.
+ */
+function buildNodesFromServerResponse(records: ServerFileRecord[]): FileNode[] {
+  // Build a path→id map for parent resolution (directories first)
+  const pathToId = new Map<string, string>();
+  for (const record of records) {
+    if (record.type === 'directory') {
+      pathToId.set(record.path, record.id);
     }
-
-    const path = pathSegments.join('/');
-    const existing = directories.get(path);
-    if (existing) {
-      return existing.id;
-    }
-
-    const parentId = ensureDirectory(pathSegments.slice(0, -1));
-    const directory: FileNode = {
-      id: buildDirectoryId(path),
-      name: pathSegments[pathSegments.length - 1],
-      type: 'directory',
-      parentId,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    directories.set(path, directory);
-    return directory.id;
-  };
-
-  for (const file of files) {
-    const pathSegments = file.path.split('/').filter(Boolean);
-    const fileName = pathSegments[pathSegments.length - 1] ?? file.name;
-    const parentId = ensureDirectory(pathSegments.slice(0, -1));
-
-    nodes.push({
-      id: file.id,
-      remoteId: file.id,
-      remotePath: file.path,
-      name: fileName,
-      type: 'file',
-      parentId,
-      content: file.content,
-      createdAt: file.created_at,
-      updatedAt: file.updated_at,
-    });
   }
 
-  return [...directories.values(), ...nodes];
+  return records.map(record => {
+    const segments = record.path.split('/').filter(Boolean);
+    const parentPath = segments.slice(0, -1).join('/');
+    const parentId = parentPath ? (pathToId.get(parentPath) ?? null) : null;
+
+    const node: FileNode = {
+      id: record.id,
+      remoteId: record.id,
+      remotePath: record.path,
+      name: record.name,
+      type: record.type,
+      parentId,
+      createdAt: record.created_at,
+      updatedAt: record.updated_at,
+    };
+    if (record.type === 'file') {
+      node.content = record.content ?? '';
+    }
+    return node;
+  });
 }
 
 function collectDescendantFileIds(fs: VirtualFileSystem, rootId: string): string[] {
   const root = fs.getNode(rootId);
-  if (!root) {
-    return [];
-  }
-  if (root.type === 'file') {
-    return [root.id];
-  }
+  if (!root) return [];
+  if (root.type === 'file') return [root.id];
 
   const fileIds: string[] = [];
   const walk = (nodeId: string) => {
@@ -137,10 +123,13 @@ function collectDescendantFileIds(fs: VirtualFileSystem, rootId: string): string
       }
     }
   };
-
   walk(rootId);
   return fileIds;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Hook                                                              */
+/* ------------------------------------------------------------------ */
 
 export function useFileSystem(projectId?: string): UseFileSystemReturn {
   const fsRef = useRef(getFileSystem());
@@ -156,46 +145,50 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     setOpenTabs(prev => prev.map(tab => (tab.fileId === fileId ? { ...tab, dirty } : tab)));
   }, []);
 
-  const scheduleRemoteSave = useCallback((fileId: string) => {
-    if (!projectId) {
-      markTabDirty(fileId, false);
-      return;
-    }
-
-    const existingTimer = saveTimersRef.current.get(fileId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-
-    const timer = setTimeout(() => {
-      saveTimersRef.current.delete(fileId);
-      const node = fs.getNode(fileId);
-      if (!node || node.type !== 'file' || !node.remoteId) {
+  /**
+   * Schedule a debounced remote save for a file.
+   * After saving, patches the local node with the server-returned ID
+   * (which may have changed if the path changed).
+   */
+  const scheduleRemoteSave = useCallback(
+    (fileId: string) => {
+      if (!projectId) {
+        markTabDirty(fileId, false);
         return;
       }
 
-      void updateProjectFile(projectId, node.remoteId, {
-        name: node.name,
-        path: fs.getPath(fileId),
-        content: node.content ?? '',
-      })
-        .then(record => {
-          fs.patchNode(fileId, {
-            remoteId: record.id,
-            remotePath: record.path,
-            name: record.name,
-            content: record.content,
-            isPending: false,
-          });
-          markTabDirty(fileId, false);
-        })
-        .catch(error => {
-          console.error('[easy-sysml] Failed to save file:', error);
-        });
-    }, REMOTE_SAVE_DELAY_MS);
+      const existing = saveTimersRef.current.get(fileId);
+      if (existing) clearTimeout(existing);
 
-    saveTimersRef.current.set(fileId, timer);
-  }, [fs, markTabDirty, projectId]);
+      const timer = setTimeout(() => {
+        saveTimersRef.current.delete(fileId);
+        const node = fs.getNode(fileId);
+        if (!node || node.type !== 'file' || !node.remoteId) return;
+
+        void updateProjectFile(projectId, node.remoteId, {
+          name: node.name,
+          path: fs.getPath(fileId),
+          content: node.content ?? '',
+        })
+          .then(record => {
+            fs.patchNode(fileId, {
+              remoteId: record.id,
+              remotePath: record.path,
+              name: record.name,
+              content: record.content,
+              isPending: false,
+            });
+            markTabDirty(fileId, false);
+          })
+          .catch(error => {
+            console.error('[easy-sysml] Failed to save file:', error);
+          });
+      }, REMOTE_SAVE_DELAY_MS);
+
+      saveTimersRef.current.set(fileId, timer);
+    },
+    [fs, markTabDirty, projectId],
+  );
 
   /* -- Initial load -- */
   useEffect(() => {
@@ -207,8 +200,8 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     const loadFiles = async () => {
       try {
         if (projectId) {
-          const remoteFiles = await listProjectFiles(projectId);
-          fs.replaceAll(buildNodesFromRemoteFiles(remoteFiles));
+          const remoteRecords = await listProjectFiles(projectId);
+          fs.replaceAll(buildNodesFromServerResponse(remoteRecords));
         } else {
           await fs.load();
         }
@@ -229,33 +222,25 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
           setNodes([]);
         }
       } finally {
-        if (mounted) {
-          setReady(true);
-        }
+        if (mounted) setReady(true);
       }
     };
 
     void loadFiles();
-
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [fs, projectId]);
 
+  /* -- Cleanup pending save timers on unmount -- */
   useEffect(() => {
     return () => {
-      for (const timer of saveTimersRef.current.values()) {
-        clearTimeout(timer);
-      }
+      for (const timer of saveTimersRef.current.values()) clearTimeout(timer);
       saveTimersRef.current.clear();
     };
   }, []);
 
   /* -- Subscribe to VFS changes -- */
   useEffect(() => {
-    return fs.subscribe(() => {
-      setNodes(fs.getAllNodes());
-    });
+    return fs.subscribe(() => setNodes(fs.getAllNodes()));
   }, [fs]);
 
   /* -- Derived state -- */
@@ -280,16 +265,18 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     });
     setActiveFileId(prev => {
       if (prev !== fileId) return prev;
-      // Select an adjacent tab from the updated list
       return remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1].fileId : null;
     });
   }, []);
 
-  const updateFileContent = useCallback((fileId: string, content: string) => {
-    fs.updateContent(fileId, content);
-    markTabDirty(fileId, true);
-    scheduleRemoteSave(fileId);
-  }, [fs, markTabDirty, scheduleRemoteSave]);
+  const updateFileContent = useCallback(
+    (fileId: string, content: string) => {
+      fs.updateContent(fileId, content);
+      markTabDirty(fileId, true);
+      scheduleRemoteSave(fileId);
+    },
+    [fs, markTabDirty, scheduleRemoteSave],
+  );
 
   const createFile = useCallback(
     (name: string, parentId: string | null, content: string = '') => {
@@ -311,7 +298,6 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
               content: record.content,
               isPending: false,
             });
-            scheduleRemoteSave(node.id);
           })
           .catch(error => {
             console.error('[easy-sysml] Failed to create file:', error);
@@ -321,42 +307,92 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
 
       return node;
     },
-    [fs, projectId, scheduleRemoteSave],
+    [fs, projectId],
   );
 
   const createDirectory = useCallback(
     (name: string, parentId: string | null) => {
-      return fs.createDirectory(name, parentId);
+      const node = fs.createDirectory(name, parentId);
+      const path = fs.getPath(node.id);
+
+      if (projectId) {
+        void createProjectDirectory(projectId, { name, path })
+          .then(record => {
+            fs.patchNode(node.id, {
+              remoteId: record.id,
+              remotePath: record.path,
+            });
+          })
+          .catch(error => {
+            console.error('[easy-sysml] Failed to create directory:', error);
+          });
+      }
+
+      return node;
     },
-    [fs],
+    [fs, projectId],
   );
 
   const renameNode = useCallback(
     (id: string, newName: string) => {
       fs.rename(id, newName);
-      for (const fileId of collectDescendantFileIds(fs, id)) {
-        scheduleRemoteSave(fileId);
+
+      const node = fs.getNode(id);
+      if (projectId && node?.type === 'directory' && node.remoteId) {
+        // For directories: rename on server, then force-save all descendant files
+        // so their paths are updated too.
+        void updateProjectFile(projectId, node.remoteId, { name: newName })
+          .then(record => {
+            fs.patchNode(id, { remoteId: record.id, remotePath: record.path });
+            for (const fileId of collectDescendantFileIds(fs, id)) {
+              scheduleRemoteSave(fileId);
+            }
+          })
+          .catch(error => {
+            console.error('[easy-sysml] Failed to rename directory:', error);
+            for (const fileId of collectDescendantFileIds(fs, id)) {
+              scheduleRemoteSave(fileId);
+            }
+          });
+      } else {
+        for (const fileId of collectDescendantFileIds(fs, id)) {
+          scheduleRemoteSave(fileId);
+        }
       }
     },
-    [fs, scheduleRemoteSave],
+    [fs, projectId, scheduleRemoteSave],
   );
 
   const deleteNode = useCallback(
     (id: string) => {
+      const node = fs.getNode(id);
       const fileIds = collectDescendantFileIds(fs, id);
-      const remoteFileIds = fileIds
-        .map(fileId => fs.getNode(fileId))
-        .filter((node): node is FileNode => Boolean(node && node.type === 'file'))
-        .map(node => node.remoteId)
-        .filter((remoteId): remoteId is string => Boolean(remoteId));
 
-      // Close any tabs for files being deleted
+      // Collect all remote IDs to delete (files and the root node if it's a dir)
+      const remoteNodeIds: string[] = [];
+      if (node?.remoteId) {
+        // If it's a directory with a remoteId, we only need to delete the directory
+        // (the server deletes recursively). Otherwise collect file IDs.
+        if (node.type === 'directory') {
+          remoteNodeIds.push(node.remoteId);
+        } else {
+          remoteNodeIds.push(node.remoteId);
+        }
+      } else {
+        // Fallback: collect remote IDs of individual files
+        for (const fileId of fileIds) {
+          const fileNode = fs.getNode(fileId);
+          if (fileNode?.remoteId) remoteNodeIds.push(fileNode.remoteId);
+        }
+      }
+
+      // Close any open tabs for the deleted nodes
       const toClose = new Set<string>();
-      const collect = (nodeId: string) => {
+      const collectIds = (nodeId: string) => {
         toClose.add(nodeId);
-        fs.getChildren(nodeId).forEach(child => collect(child.id));
+        for (const child of fs.getChildren(nodeId)) collectIds(child.id);
       };
-      collect(id);
+      collectIds(id);
 
       let remainingTabs: OpenTab[] = [];
       setOpenTabs(prev => {
@@ -381,9 +417,9 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
       }
 
       if (projectId) {
-        for (const remoteFileId of remoteFileIds) {
-          void deleteProjectFile(projectId, remoteFileId).catch(error => {
-            console.error('[easy-sysml] Failed to delete file:', error);
+        for (const remoteNodeId of remoteNodeIds) {
+          void deleteProjectFile(projectId, remoteNodeId).catch(error => {
+            console.error('[easy-sysml] Failed to delete node:', error);
           });
         }
       }
@@ -406,15 +442,9 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     [fs],
   );
 
-  const getPath = useCallback(
-    (id: string) => fs.getPath(id),
-    [fs],
-  );
+  const getPath = useCallback((id: string) => fs.getPath(id), [fs]);
 
-  const getUri = useCallback(
-    (id: string) => fs.getUri(id),
-    [fs],
-  );
+  const getUri = useCallback((id: string) => fs.getUri(id), [fs]);
 
   return {
     ready,
@@ -438,3 +468,4 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     fs,
   };
 }
+
