@@ -12,6 +12,8 @@ import {
   HelpCircle, 
   Settings,
   Plus,
+  Code,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Project } from '../types';
@@ -26,6 +28,10 @@ interface HeaderProps {
   onSelectProject?: (projectId: string) => void;
   onCreateProject?: () => void;
   projectBusy?: boolean;
+  showCode?: boolean;
+  setShowCode?: (show: boolean) => void;
+  showAI?: boolean;
+  setShowAI?: (show: boolean) => void;
 }
 
 export const Header = ({ 
@@ -38,6 +44,10 @@ export const Header = ({
   onSelectProject,
   onCreateProject,
   projectBusy = false,
+  showCode = false,
+  setShowCode,
+  showAI = false,
+  setShowAI,
 }: HeaderProps) => {
   return (
     <header className="h-12 border-b border-[var(--border-color)] flex items-center justify-between px-4 bg-[var(--bg-header)] z-50 transition-colors duration-200">
@@ -103,7 +113,40 @@ export const Header = ({
         ))}
       </nav>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        {/* Code editor toggle */}
+        {setShowCode && (
+          <button
+            onClick={() => setShowCode(!showCode)}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors',
+              showCode
+                ? 'bg-blue-500/15 text-blue-500 border border-blue-500/30'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--border-color)] border border-transparent',
+            )}
+            title={showCode ? '隐藏代码编辑器' : '显示代码编辑器'}
+          >
+            <Code size={14} />
+            <span className="hidden xl:inline">代码</span>
+          </button>
+        )}
+        {/* AI assistant toggle */}
+        {setShowAI && (
+          <button
+            onClick={() => setShowAI(!showAI)}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors',
+              showAI
+                ? 'bg-purple-500/15 text-purple-500 border border-purple-500/30'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--border-color)] border border-transparent',
+            )}
+            title={showAI ? '隐藏 AI 助手' : '打开 AI 助手'}
+          >
+            <Sparkles size={14} />
+            <span className="hidden xl:inline">AI</span>
+          </button>
+        )}
+        <div className="h-4 w-px bg-[var(--border-color)]" />
         <button 
           onClick={toggleTheme}
           className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--border-color)] rounded-md transition-colors"
