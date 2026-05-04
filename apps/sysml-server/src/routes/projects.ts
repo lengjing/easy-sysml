@@ -28,6 +28,16 @@ function initGitRepo(workDir: string, projectName: string): void {
     spawnSync('git', args, { cwd: workDir, stdio: 'pipe' });
 
   const init = run(['init']);
+  if (init.error) {
+    // git binary not found or cannot be executed
+    console.warn(
+      '[sysml-server] git not available — skipping repo init:',
+      (init.error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'git command not found'
+        : init.error.message,
+    );
+    return;
+  }
   if (init.status !== 0) {
     console.warn('[sysml-server] git init failed:', init.stderr?.toString());
     return;
@@ -36,9 +46,16 @@ function initGitRepo(workDir: string, projectName: string): void {
   // Create a .gitkeep so the initial commit is non-empty
   writeFileSync(join(workDir, '.gitkeep'), '');
 
-  // Configure a minimal identity for the commit if none is set globally
-  run(['config', 'user.email', 'sysml-server@local']);
-  run(['config', 'user.name', 'SysML Server']);
+  // Configure a minimal identity for the commit if none is set globally.
+  // Log a warning if config fails but continue — a pre-configured global identity is fine.
+  const emailResult = run(['config', 'user.email', 'sysml-server@local']);
+  if (emailResult.status !== 0) {
+    console.warn('[sysml-server] git config user.email failed:', emailResult.stderr?.toString());
+  }
+  const nameResult = run(['config', 'user.name', 'SysML Server']);
+  if (nameResult.status !== 0) {
+    console.warn('[sysml-server] git config user.name failed:', nameResult.stderr?.toString());
+  }
 
   run(['add', '.gitkeep']);
   const commit = run(['commit', '-m', `Initial commit for project: ${projectName}`]);
