@@ -5,7 +5,7 @@
  * Manages free-code agent sessions internally, keyed by conversationId.
  *
  * Request body:
- *   { messages, currentCode?, conversationId?, autoApply? }
+ *   { messages, currentCode?, conversationId?, autoApply?, projectId? }
  *
  * SSE event stream:
  *   session    — { conversationId }  (first event)
@@ -13,7 +13,7 @@
  *   thinking   — { content }         reasoning content
  *   tool_call  — { id, name, input?, status, result? }  tool operations
  *   code       — { content, language, autoApply, filePath }  SysML file written
- *   result     — { is_error, duration_ms, total_cost_usd }   final summary
+ *   result     — { is_error, duration_ms, total_cost_usd, usage? }   final summary
  *   error      — { content }
  *   done       — {}
  */
@@ -22,12 +22,11 @@ import { Router, type Request, type Response } from 'express';
 import { resolve } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
+import { authenticateAiApiKey, recordAiApiKeyUsage, type AiApiUsage } from '../aiKeys.js';
+import { getDb } from '../db.js';
+import { ensureStoredProjectWorkDir } from '../projectStorage.js';
 
 export const directChatRouter = Router();
-
-/* ------------------------------------------------------------------ */
-/*  SysML v2 system prompt for the agent                              */
-/* ------------------------------------------------------------------ */
 
 const SYSML_SYSTEM_PROMPT = `You are SysML Copilot, a SysML v2 modeling agent embedded in the easy-sysml IDE.
 
@@ -39,7 +38,7 @@ Your capabilities:
 
 SysML v2 syntax reference:
 - \`package\`          — top-level namespace container
-- \`part def\`         — component/block definition  
+- \`part def\`         — component/block definition
 - \`part\`             — part usage (instance within context)
 - \`attribute\`        — typed attribute (e.g., attribute mass : Real;)
 - \`port def\` / \`port\` — interface definitions / usages
@@ -58,15 +57,13 @@ When asked to create or modify SysML models:
 
 Always respond in the same language as the user (Chinese or English).`;
 
-/* ------------------------------------------------------------------ */
-/*  In-memory conversation state                                      */
-/* ------------------------------------------------------------------ */
-
 interface ConversationState {
   freeCodeSessionId: string;
   freeCodeWsUrl: string;
   lastActiveAt: number;
   needsBootstrap: boolean;
+  projectId: string | null;
+  workDir: string;
 }
 
 interface StreamState {
@@ -76,10 +73,10 @@ interface StreamState {
 
 const conversations = new Map<string, ConversationState>();
 const DIRECT_CHAT_SESSION_MAX_AGE_MS = 9 * 60 * 1000;
+const CONVERSATION_TTL = 30 * 60 * 1000;
 const MAX_HISTORY_MESSAGES = 12;
+const MAX_TOOL_RESULT = 800;
 
-// Evict stale conversations every 5 minutes
-const CONVERSATION_TTL = 30 * 60 * 1000; // 30 min
 setInterval(
   () => {
     const now = Date.now();
@@ -91,10 +88,6 @@ setInterval(
   },
   5 * 60 * 1000,
 ).unref();
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
 
 function getFreeCodeUrl(): string {
   return process.env.FREE_CODE_SERVER_URL || 'http://localhost:3002';
@@ -126,10 +119,36 @@ function getDirectChatWorkDir(): string {
   return resolve(process.env.FREE_CODE_WORK_DIR || process.cwd());
 }
 
+function resolveDirectChatContext(projectId: string | undefined): {
+  projectId: string | null;
+  workDir: string;
+} {
+  if (!projectId) {
+    return {
+      projectId: null,
+      workDir: getDirectChatWorkDir(),
+    };
+  }
+
+  const project = getDb()
+    .prepare('SELECT id, work_dir FROM projects WHERE id = ?')
+    .get(projectId) as { id: string; work_dir?: string } | undefined;
+  if (!project) {
+    throw new Error('Project not found');
+  }
+
+  return {
+    projectId: project.id,
+    workDir: ensureStoredProjectWorkDir(project.id, project.work_dir),
+  };
+}
+
 function freeCodeHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAuthToken();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   return headers;
 }
 
@@ -144,8 +163,6 @@ function buildWsUrl(wsUrl: string): string {
 function sseWrite(res: Response, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
-
-const MAX_TOOL_RESULT = 800;
 
 function buildUserTurnContent(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -180,16 +197,10 @@ function buildUserTurnContent(
   return parts.join('\n\n');
 }
 
-/* ------------------------------------------------------------------ */
-/*  POST /api/chat                                                     */
-/* ------------------------------------------------------------------ */
-
-/**
- * Create a fresh free-code session and return its state.
- * The system_prompt captures the current editor code context so the agent
- * always starts with up-to-date information.
- */
-async function createFreeCodeSession(): Promise<ConversationState> {
+async function createFreeCodeSession(
+  workDir: string,
+  projectId: string | null,
+): Promise<ConversationState> {
   let lastError: unknown;
 
   for (const baseUrl of getFreeCodeUrlCandidates()) {
@@ -199,7 +210,7 @@ async function createFreeCodeSession(): Promise<ConversationState> {
         headers: freeCodeHeaders(),
         body: JSON.stringify({
           dangerously_skip_permissions: true,
-          cwd: getDirectChatWorkDir(),
+          cwd: workDir,
         }),
       });
 
@@ -218,6 +229,8 @@ async function createFreeCodeSession(): Promise<ConversationState> {
         freeCodeWsUrl: ws_url,
         lastActiveAt: Date.now(),
         needsBootstrap: true,
+        projectId,
+        workDir,
       };
     } catch (error) {
       lastError = error;
@@ -233,32 +246,58 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     currentCode,
     conversationId: clientConvId,
     autoApply = true,
+    projectId,
   } = req.body as {
     messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     currentCode?: string;
     conversationId?: string;
     autoApply?: boolean;
+    projectId?: string;
   };
+
+  const apiKeyValue = req.header('x-easy-sysml-api-key')?.trim();
+  if (!apiKeyValue) {
+    res.status(401).json({ error: 'AI API key is required' });
+    return;
+  }
+
+  const apiKeyAuth = authenticateAiApiKey(apiKeyValue);
+  if (apiKeyAuth.status === 'invalid') {
+    res.status(401).json({ error: 'AI API key is invalid or revoked' });
+    return;
+  }
+  if (apiKeyAuth.status === 'insufficient_balance') {
+    res.status(402).json({ error: 'AI API key balance exhausted, recharge required' });
+    return;
+  }
+  const authenticatedApiKey = apiKeyAuth.record;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: 'messages is required' });
     return;
   }
 
-  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  const lastUserMsg = [...messages].reverse().find(message => message.role === 'user');
   if (!lastUserMsg) {
     res.status(400).json({ error: 'No user message found' });
     return;
   }
-  const requestMessages = messages;
 
-  // Disable Nagle's algorithm for this connection immediately so every
-  // res.write() call results in an immediate TCP segment — this is the key
-  // to getting character-by-character SSE streaming to the browser.
-  const responseSock = (res as unknown as { socket?: { setNoDelay?: (v: boolean) => void } }).socket;
+  const requestedProjectId = typeof projectId === 'string' && projectId.trim() ? projectId.trim() : undefined;
+  let chatContext: { projectId: string | null; workDir: string };
+  try {
+    chatContext = resolveDirectChatContext(requestedProjectId);
+  } catch (error) {
+    res.status(404).json({
+      error: error instanceof Error ? error.message : 'Project not found',
+    });
+    return;
+  }
+
+  const requestMessages = messages;
+  const responseSock = (res as unknown as { socket?: { setNoDelay?: (enabled: boolean) => void } }).socket;
   responseSock?.setNoDelay?.(true);
 
-  // Send SSE headers immediately
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -267,16 +306,16 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
   });
 
   const convId = clientConvId || uuidv4();
-
-  /* ---------- Reuse existing session or create a new one ---------- */
   let convState = conversations.get(convId);
   const shouldRefreshSession = convState
-    ? Date.now() - convState.lastActiveAt > DIRECT_CHAT_SESSION_MAX_AGE_MS
+    ? Date.now() - convState.lastActiveAt > DIRECT_CHAT_SESSION_MAX_AGE_MS ||
+      convState.projectId !== chatContext.projectId ||
+      convState.workDir !== chatContext.workDir
     : false;
 
   if (!convState || shouldRefreshSession) {
     try {
-      convState = await createFreeCodeSession();
+      convState = await createFreeCodeSession(chatContext.workDir, chatContext.projectId);
       conversations.set(convId, convState);
     } catch (err) {
       sseWrite(res, 'error', {
@@ -292,37 +331,23 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     convState.lastActiveAt = Date.now();
   }
 
-  // Acknowledge the conversation ID to the client
   sseWrite(res, 'session', { conversationId: convId });
 
-  /* ---------- Connect to free-code WebSocket and send message ---------- */
-
-  /**
-   * Attempt to connect to a free-code session WebSocket and stream the
-   * response.  If the session has died (e.g. idle-timeout), the WS will
-   * fail immediately (before any message is received).  In that case we
-   * create a fresh session and retry exactly once.
-   */
   function connectAndStream(state: ConversationState, isRetry: boolean): void {
     const ws = new WebSocket(buildWsUrl(state.freeCodeWsUrl));
     let finished = false;
     let receivedAnyMessage = false;
+    let usageRecorded = false;
     const streamState: StreamState = {
       sawPartialText: false,
       sawPartialThinking: false,
     };
-    const pendingToolUses = new Map<
-      string,
-      { name: string; input: Record<string, unknown> }
-    >();
+    const pendingToolUses = new Map<string, { name: string; input: Record<string, unknown> }>();
 
     const finish = () => {
       if (finished) return;
       finished = true;
-      if (
-        ws.readyState === WebSocket.OPEN ||
-        ws.readyState === WebSocket.CONNECTING
-      ) {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
       res.end();
@@ -331,11 +356,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     res.on('close', finish);
 
     ws.on('open', () => {
-      const userContent = buildUserTurnContent(
-        requestMessages,
-        currentCode,
-        state.needsBootstrap,
-      );
+      const userContent = buildUserTurnContent(requestMessages, currentCode, state.needsBootstrap);
       state.needsBootstrap = false;
       state.lastActiveAt = Date.now();
       ws.send(
@@ -353,84 +374,84 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 
     ws.on('message', (rawData: Buffer | string) => {
       receivedAnyMessage = true;
-      const raw =
-        typeof rawData === 'string' ? rawData : rawData.toString('utf-8');
+      const raw = typeof rawData === 'string' ? rawData : rawData.toString('utf-8');
       for (const line of raw.split('\n')) {
         const trimmed = line.trim();
         if (!trimmed) continue;
+
         try {
           const msg = JSON.parse(trimmed) as Record<string, unknown>;
-          handleFreeCodeMsg(
-            res,
-            msg,
-            pendingToolUses,
-            autoApply,
-            streamState,
-          );
+          if (msg.type === 'result' && !usageRecorded) {
+            usageRecorded = true;
+            recordAiApiKeyUsage(
+              authenticatedApiKey.id,
+              (msg.usage ?? undefined) as AiApiUsage | undefined,
+              typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : undefined,
+            );
+          }
+
+          handleFreeCodeMsg(res, msg, pendingToolUses, autoApply, streamState);
           if (msg.type === 'result') {
             sseWrite(res, 'done', {});
             finish();
             return;
           }
         } catch {
-          // skip non-JSON lines (e.g. debug output)
+          // Skip non-JSON lines (e.g. debug output)
         }
       }
     });
 
     ws.on('error', (err: Error) => {
       if (finished) return;
+
       if (!receivedAnyMessage && !isRetry) {
-        // Session likely died (idle timeout).  Remove the stale entry and
-        // retry once with a brand-new session.
         conversations.delete(convId);
-        createFreeCodeSession()
+        createFreeCodeSession(state.workDir, state.projectId)
           .then(fresh => {
             conversations.set(convId, fresh);
             connectAndStream(fresh, true);
           })
           .catch((sessionErr: unknown) => {
-            const msg = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
-            sseWrite(res, 'error', { content: `会话恢复失败: ${msg}` });
+            const message = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
+            sseWrite(res, 'error', { content: `会话恢复失败: ${message}` });
             sseWrite(res, 'done', {});
             finish();
           });
-      } else {
-        sseWrite(res, 'error', { content: `WebSocket 错误: ${err.message}` });
-        sseWrite(res, 'done', {});
-        finish();
+        return;
       }
+
+      sseWrite(res, 'error', { content: `WebSocket 错误: ${err.message}` });
+      sseWrite(res, 'done', {});
+      finish();
     });
 
     ws.on('close', () => {
       if (finished) return;
+
       if (!receivedAnyMessage && !isRetry) {
-        // Session closed immediately (process already dead).  Retry once.
         conversations.delete(convId);
-          createFreeCodeSession()
+        createFreeCodeSession(state.workDir, state.projectId)
           .then(fresh => {
             conversations.set(convId, fresh);
             connectAndStream(fresh, true);
           })
           .catch((sessionErr: unknown) => {
-            const msg = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
-            sseWrite(res, 'error', { content: `会话恢复失败: ${msg}` });
+            const message = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
+            sseWrite(res, 'error', { content: `会话恢复失败: ${message}` });
             sseWrite(res, 'done', {});
             finish();
           });
-      } else {
-        sseWrite(res, 'done', {});
-        finish();
+        return;
       }
+
+      sseWrite(res, 'done', {});
+      finish();
     });
   }
 
   connectAndStream(convState, false);
 });
-
-/* ------------------------------------------------------------------ */
-/*  Map free-code messages → SSE events                               */
-/* ------------------------------------------------------------------ */
 
 export function handleFreeCodeMsg(
   res: Response,
@@ -474,10 +495,7 @@ export function handleFreeCodeMsg(
     }
 
     case 'assistant': {
-      // Full assistant turn — process content blocks
-      const contentBlocks = (
-        msg.message as { content?: unknown[] } | undefined
-      )?.content;
+      const contentBlocks = (msg.message as { content?: unknown[] } | undefined)?.content;
       if (typeof contentBlocks === 'string') {
         if (contentBlocks && !streamState.sawPartialText) {
           sseWrite(res, 'delta', { content: contentBlocks });
@@ -487,23 +505,23 @@ export function handleFreeCodeMsg(
       if (!Array.isArray(contentBlocks)) break;
 
       for (const block of contentBlocks) {
-        const b = block as Record<string, unknown>;
+        const nextBlock = block as Record<string, unknown>;
         if (
-          b.type === 'text' &&
-          typeof b.text === 'string' &&
+          nextBlock.type === 'text' &&
+          typeof nextBlock.text === 'string' &&
           !streamState.sawPartialText
         ) {
-          sseWrite(res, 'delta', { content: b.text });
+          sseWrite(res, 'delta', { content: nextBlock.text });
         } else if (
-          b.type === 'thinking' &&
-          typeof b.thinking === 'string' &&
+          nextBlock.type === 'thinking' &&
+          typeof nextBlock.thinking === 'string' &&
           !streamState.sawPartialThinking
         ) {
-          sseWrite(res, 'thinking', { content: b.thinking });
-        } else if (b.type === 'tool_use') {
-          const id = String(b.id ?? '');
-          const name = String(b.name ?? 'unknown');
-          const input = (b.input ?? {}) as Record<string, unknown>;
+          sseWrite(res, 'thinking', { content: nextBlock.thinking });
+        } else if (nextBlock.type === 'tool_use') {
+          const id = String(nextBlock.id ?? '');
+          const name = String(nextBlock.name ?? 'unknown');
+          const input = (nextBlock.input ?? {}) as Record<string, unknown>;
           pendingToolUses.set(id, { name, input });
           sseWrite(res, 'tool_call', { id, name, input, status: 'running' });
         }
@@ -516,20 +534,15 @@ export function handleFreeCodeMsg(
       const isError = Boolean(msg.is_error);
       const resultText = Array.isArray(msg.content)
         ? (msg.content as Array<{ text?: string }>)
-            .map(c => c.text ?? '')
+            .map(chunk => chunk.text ?? '')
             .join('\n')
             .slice(0, MAX_TOOL_RESULT)
         : String(msg.content ?? '').slice(0, MAX_TOOL_RESULT);
 
-      // Detect Write to a .sysml file → emit code event for editor sync
-      const tu = pendingToolUses.get(id);
-      if (!isError && tu?.name === 'Write') {
-        const filePath = String(
-          tu.input.file_path ?? tu.input.path ?? '',
-        );
-        const fileContent = String(
-          tu.input.content ?? tu.input.new_content ?? '',
-        );
+      const toolUse = pendingToolUses.get(id);
+      if (!isError && toolUse?.name === 'Write') {
+        const filePath = String(toolUse.input.file_path ?? toolUse.input.path ?? '');
+        const fileContent = String(toolUse.input.content ?? toolUse.input.new_content ?? '');
         if (filePath.endsWith('.sysml') && fileContent) {
           sseWrite(res, 'code', {
             content: fileContent,
@@ -555,22 +568,21 @@ export function handleFreeCodeMsg(
         is_error: Boolean(msg.is_error),
         duration_ms: msg.duration_ms,
         total_cost_usd: msg.total_cost_usd,
+        usage: msg.usage,
       });
       break;
     }
 
     case 'assistant_error': {
       sseWrite(res, 'error', {
-        content:
-          typeof msg.message === 'string' ? msg.message : 'Agent error',
+        content: typeof msg.message === 'string' ? msg.message : 'Agent error',
       });
       break;
     }
 
     case 'server_error': {
       sseWrite(res, 'error', {
-        content:
-          typeof msg.content === 'string' ? msg.content : 'Session server error',
+        content: typeof msg.content === 'string' ? msg.content : 'Session server error',
       });
       break;
     }

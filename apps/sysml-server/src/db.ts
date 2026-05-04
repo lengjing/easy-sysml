@@ -35,6 +35,7 @@ function migrate(db: Database.Database): void {
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
+      work_dir    TEXT NOT NULL DEFAULT '',
       created_at  INTEGER NOT NULL,
       updated_at  INTEGER NOT NULL
     );
@@ -60,5 +61,37 @@ function migrate(db: Database.Database): void {
       created_at           INTEGER NOT NULL,
       updated_at           INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS ai_api_keys (
+      id                                 TEXT PRIMARY KEY,
+      name                               TEXT NOT NULL,
+      key_prefix                         TEXT NOT NULL,
+      key_hash                           TEXT NOT NULL UNIQUE,
+      created_at                         INTEGER NOT NULL,
+      updated_at                         INTEGER NOT NULL,
+      last_used_at                       INTEGER,
+      revoked_at                         INTEGER,
+      total_requests                     INTEGER NOT NULL DEFAULT 0,
+      total_input_tokens                 INTEGER NOT NULL DEFAULT 0,
+      total_output_tokens                INTEGER NOT NULL DEFAULT 0,
+      total_cache_creation_input_tokens  INTEGER NOT NULL DEFAULT 0,
+      total_cache_read_input_tokens      INTEGER NOT NULL DEFAULT 0,
+      total_cost_usd                     REAL NOT NULL DEFAULT 0,
+      balance_usd                        REAL
+    );
   `);
+
+  const projectColumns = db
+    .prepare("PRAGMA table_info(projects)")
+    .all() as Array<{ name: string }>;
+  if (!projectColumns.some(column => column.name === 'work_dir')) {
+    db.exec("ALTER TABLE projects ADD COLUMN work_dir TEXT NOT NULL DEFAULT ''");
+  }
+
+  const aiKeyColumns = db
+    .prepare("PRAGMA table_info(ai_api_keys)")
+    .all() as Array<{ name: string }>;
+  if (!aiKeyColumns.some(column => column.name === 'balance_usd')) {
+    db.exec('ALTER TABLE ai_api_keys ADD COLUMN balance_usd REAL');
+  }
 }

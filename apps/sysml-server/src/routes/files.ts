@@ -9,6 +9,11 @@ import { Router, type Request, type Response } from 'express';
 import { posix } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db.js';
+import {
+  deleteProjectFile as deleteProjectFileOnDisk,
+  ensureStoredProjectWorkDir,
+  writeProjectFile,
+} from '../projectStorage.js';
 
 export const filesRouter = Router({ mergeParams: true });
 
@@ -43,11 +48,14 @@ function sanitizeFilePath(rawPath: string): string | null {
 
 filesRouter.get('/', (req: Request, res: Response) => {
   const db = getDb();
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.projectId);
+  const project = db.prepare('SELECT id, work_dir FROM projects WHERE id = ?').get(req.params.projectId) as
+    | { id: string; work_dir?: string }
+    | undefined;
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
+  ensureStoredProjectWorkDir(project.id, project.work_dir);
   const files = db
     .prepare('SELECT * FROM sysml_files WHERE project_id = ? ORDER BY path ASC')
     .all(req.params.projectId);
@@ -60,7 +68,9 @@ filesRouter.get('/', (req: Request, res: Response) => {
 
 filesRouter.post('/', (req: Request, res: Response) => {
   const db = getDb();
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.projectId);
+  const project = db.prepare('SELECT id, work_dir FROM projects WHERE id = ?').get(req.params.projectId) as
+    | { id: string; work_dir?: string }
+    | undefined;
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
@@ -96,6 +106,16 @@ filesRouter.post('/', (req: Request, res: Response) => {
 
   const now = Date.now();
   const id = uuidv4();
+  const workDir = ensureStoredProjectWorkDir(project.id, project.work_dir);
+
+  try {
+    writeProjectFile(workDir, resolvedPath, content);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to write project file',
+    });
+    return;
+  }
 
   db.prepare(
     'INSERT INTO sysml_files (id, project_id, name, path, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -128,10 +148,20 @@ filesRouter.get('/:fileId', (req: Request, res: Response) => {
 filesRouter.put('/:fileId', (req: Request, res: Response) => {
   const db = getDb();
   const existing = db
-    .prepare('SELECT id, path FROM sysml_files WHERE id = ? AND project_id = ?')
-    .get(req.params.fileId, req.params.projectId) as { id: string; path: string } | undefined;
+    .prepare('SELECT id, path, content FROM sysml_files WHERE id = ? AND project_id = ?')
+    .get(req.params.fileId, req.params.projectId) as
+    | { id: string; path: string; content: string }
+    | undefined;
   if (!existing) {
     res.status(404).json({ error: 'File not found' });
+    return;
+  }
+
+  const project = db.prepare('SELECT id, work_dir FROM projects WHERE id = ?').get(req.params.projectId) as
+    | { id: string; work_dir?: string }
+    | undefined;
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
     return;
   }
 
@@ -141,6 +171,12 @@ filesRouter.put('/:fileId', (req: Request, res: Response) => {
     content?: string;
   };
   const now = Date.now();
+  const nextPath = filePath !== undefined ? sanitizeFilePath(filePath.trim()) : existing.path;
+  if (!nextPath) {
+    res.status(400).json({ error: 'Invalid file path' });
+    return;
+  }
+  const nextContent = content ?? existing.content;
 
   const sets: string[] = ['updated_at = ?'];
   const params: unknown[] = [now];
@@ -158,24 +194,31 @@ filesRouter.put('/:fileId', (req: Request, res: Response) => {
     params.push(content);
   }
   if (filePath !== undefined) {
-    const resolvedPath = sanitizeFilePath(filePath.trim());
-    if (!resolvedPath) {
-      res.status(400).json({ error: 'Invalid file path' });
-      return;
-    }
-
     const duplicate = db
       .prepare('SELECT id FROM sysml_files WHERE project_id = ? AND path = ? AND id != ?')
-      .get(req.params.projectId, resolvedPath, req.params.fileId);
+      .get(req.params.projectId, nextPath, req.params.fileId);
     if (duplicate) {
       res.status(409).json({ error: 'A file with this path already exists in the project' });
       return;
     }
 
-    if (resolvedPath !== existing.path) {
+    if (nextPath !== existing.path) {
       sets.push('path = ?');
-      params.push(resolvedPath);
+      params.push(nextPath);
     }
+  }
+
+  const workDir = ensureStoredProjectWorkDir(project.id, project.work_dir);
+  try {
+    writeProjectFile(workDir, nextPath, nextContent);
+    if (nextPath !== existing.path) {
+      deleteProjectFileOnDisk(workDir, existing.path);
+    }
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to update project file',
+    });
+    return;
   }
 
   params.push(req.params.fileId, req.params.projectId);
@@ -193,6 +236,23 @@ filesRouter.put('/:fileId', (req: Request, res: Response) => {
 
 filesRouter.delete('/:fileId', (req: Request, res: Response) => {
   const db = getDb();
+  const file = db
+    .prepare('SELECT path FROM sysml_files WHERE id = ? AND project_id = ?')
+    .get(req.params.fileId, req.params.projectId) as { path: string } | undefined;
+  if (!file) {
+    res.status(404).json({ error: 'File not found' });
+    return;
+  }
+
+  const project = db.prepare('SELECT id, work_dir FROM projects WHERE id = ?').get(req.params.projectId) as
+    | { id: string; work_dir?: string }
+    | undefined;
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  deleteProjectFileOnDisk(ensureStoredProjectWorkDir(project.id, project.work_dir), file.path);
   const result = db
     .prepare('DELETE FROM sysml_files WHERE id = ? AND project_id = ?')
     .run(req.params.fileId, req.params.projectId);

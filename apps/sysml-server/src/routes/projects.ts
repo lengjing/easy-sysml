@@ -7,6 +7,7 @@
 import { Router, type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db.js';
+import { ensureProjectWorkDir, ensureStoredProjectWorkDir, removeProjectWorkDir } from '../projectStorage.js';
 
 export const projectsRouter = Router();
 
@@ -16,8 +17,15 @@ export const projectsRouter = Router();
 
 projectsRouter.get('/', (_req: Request, res: Response) => {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all();
-  res.json(rows);
+  const rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as Array<{
+    id: string;
+    work_dir?: string;
+  }>;
+  const hydratedRows = rows.map(row => ({
+    ...row,
+    work_dir: ensureStoredProjectWorkDir(row.id, row.work_dir),
+  }));
+  res.json(hydratedRows);
 });
 
 /* ------------------------------------------------------------------ */
@@ -34,10 +42,11 @@ projectsRouter.post('/', (req: Request, res: Response) => {
   const db = getDb();
   const now = Date.now();
   const id = uuidv4();
+  const workDir = ensureProjectWorkDir(id);
 
   db.prepare(
-    'INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(id, name.trim(), description.trim(), now, now);
+    'INSERT INTO projects (id, name, description, work_dir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(id, name.trim(), description.trim(), workDir, now, now);
 
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
   res.status(201).json(project);
@@ -49,12 +58,17 @@ projectsRouter.post('/', (req: Request, res: Response) => {
 
 projectsRouter.get('/:id', (req: Request, res: Response) => {
   const db = getDb();
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id) as
+    | ({ id: string; work_dir?: string } & Record<string, unknown>)
+    | undefined;
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-  res.json(project);
+  res.json({
+    ...project,
+    work_dir: ensureStoredProjectWorkDir(project.id, project.work_dir),
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -93,7 +107,15 @@ projectsRouter.put('/:id', (req: Request, res: Response) => {
   db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  res.json(project);
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const hydratedProject = project as { id: string; work_dir?: string } & Record<string, unknown>;
+  res.json({
+    ...hydratedProject,
+    work_dir: ensureStoredProjectWorkDir(hydratedProject.id, hydratedProject.work_dir),
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -102,10 +124,17 @@ projectsRouter.put('/:id', (req: Request, res: Response) => {
 
 projectsRouter.delete('/:id', (req: Request, res: Response) => {
   const db = getDb();
-  const result = db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
-  if (result.changes === 0) {
+  const project = db.prepare('SELECT id, work_dir FROM projects WHERE id = ?').get(req.params.id) as
+    | { id: string; work_dir?: string }
+    | undefined;
+  if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
+  }
+
+  const result = db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+  if (result.changes > 0) {
+    removeProjectWorkDir(ensureStoredProjectWorkDir(project.id, project.work_dir));
   }
   res.json({ ok: true });
 });

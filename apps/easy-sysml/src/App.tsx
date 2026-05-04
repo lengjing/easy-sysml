@@ -278,6 +278,7 @@ function WorkbenchContent() {
                     <AIChatPanel
                       onApplyCode={handleApplyAICode}
                       currentCode={kermlCode}
+                      projectId={currentProjectId}
                     />
                   </div>
                 )}

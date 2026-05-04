@@ -63,6 +63,8 @@ The Vite proxy forwards `/api/*` to sysml-server on port 3001.
 | `FREE_CODE_AUTH_TOKEN` | _(none)_ | Optional auth token for free-code server |
 | `FREE_CODE_WORK_DIR` | _(cwd)_ | Default working directory for free-code sessions |
 | `DB_PATH` | `./data/sysml.db` | SQLite database file path |
+| `EASY_SYSML_ADMIN_USERNAME` | `admin` | Username for the admin-only API key management page |
+| `EASY_SYSML_ADMIN_PASSWORD` | `easy-sysml-admin` | Password for the admin-only API key management page |
 
 ## API
 
@@ -138,3 +140,21 @@ SSE events:
 - `result` — final result `{ result, is_error, duration_ms, total_cost_usd }`
 - `error` — error `{ content: string }`
 - `done` — stream complete `{}`
+
+### Admin Session
+
+```
+GET    /api/admin/session                        Check whether the admin session is valid
+POST   /api/admin/session/login                  Login with {username, password}
+DELETE /api/admin/session                        Logout the current admin session
+```
+
+Admin session requests use the `X-Admin-Session` header. The frontend admin page stores the returned session token locally and sends it automatically for API key management.
+
+### AI API Keys
+
+```
+GET    /api/ai/keys                              List all AI API keys (admin only)
+POST   /api/ai/keys                              Create a new AI API key (admin only)
+DELETE /api/ai/keys/:id                          Revoke an AI API key (admin only)
+```

@@ -71,6 +71,7 @@ interface StoredSession {
 interface AIChatPanelProps {
   onApplyCode: (code: string) => void;
   currentCode?: string;
+  projectId?: string;
 }
 
 interface BackendStatus {
@@ -80,6 +81,7 @@ interface BackendStatus {
   configured?: boolean;
   providerLabel?: string;
   free_code_server_url?: string;
+  ai_api_key_required?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -194,6 +196,7 @@ const MAX_THINKING_DURATION_MS = 10_000;
 const MAX_TITLE_LENGTH = 40;
 /** Maximum number of sessions to persist in localStorage */
 const MAX_STORED_SESSIONS = 50;
+const AI_API_KEY_STORAGE_KEY = 'easy-sysml-ai-api-key';
 
 let _nextId = 0;
 function makeId(): string {
@@ -213,6 +216,28 @@ function formatRelativeTime(ts: number): string {
   return `${Math.floor(diff / 86_400_000)} 天前`;
 }
 
+function formatDurationLabel(durationMs: number | undefined): string {
+  if (durationMs === undefined) {
+    return '0.0 秒';
+  }
+
+  return `${(durationMs / 1000).toFixed(1)} 秒`;
+}
+
+function getStepDurationMs(steps: ThinkingStep[]): number | undefined {
+  if (steps.length === 0) {
+    return undefined;
+  }
+
+  const firstTimestamp = steps[0]?.timestamp;
+  const lastTimestamp = steps[steps.length - 1]?.timestamp;
+  if (firstTimestamp === undefined || lastTimestamp === undefined) {
+    return undefined;
+  }
+
+  return Math.max(100, lastTimestamp - firstTimestamp);
+}
+
 const SESSIONS_STORAGE_KEY = 'ai-chat-sessions-v1';
 
 function loadSessions(): StoredSession[] {
@@ -229,6 +254,26 @@ function saveSessions(sessions: StoredSession[]): void {
     localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.slice(0, MAX_STORED_SESSIONS)));
   } catch {
     // ignore quota errors
+  }
+}
+
+function loadStoredApiKey(): string {
+  try {
+    return localStorage.getItem(AI_API_KEY_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function persistApiKey(value: string): void {
+  try {
+    if (value.trim()) {
+      localStorage.setItem(AI_API_KEY_STORAGE_KEY, value.trim());
+    } else {
+      localStorage.removeItem(AI_API_KEY_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage errors
   }
 }
 
@@ -297,6 +342,7 @@ const markdownComponents = {
 export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   onApplyCode,
   currentCode,
+  projectId,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -304,6 +350,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const [showCommands, setShowCommands] = useState(false);
   const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState(loadStoredApiKey);
+  const [apiKeyDraft, setApiKeyDraft] = useState(loadStoredApiKey);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
 
   // Conversation state — sent to sysml-server so it can reuse the convId label
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -362,6 +411,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   }, []);
 
   const aiAvailable = backendStatus?.ok === true;
+  const apiKeyRequired = backendStatus?.ai_api_key_required !== false;
+  const hasConfiguredApiKey = !apiKeyRequired || apiKey.trim().length > 0;
+  const chatEnabled = aiAvailable && hasConfiguredApiKey;
 
   // Auto-scroll
   useEffect(() => {
@@ -418,10 +470,34 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     }
   }, [currentCode]);
 
+  const handleSaveApiKey = useCallback(() => {
+    const nextKey = apiKeyDraft.trim();
+    if (!nextKey) {
+      setApiKeyError('请输入有效的 API key');
+      return;
+    }
+
+    persistApiKey(nextKey);
+    setApiKey(nextKey);
+    setApiKeyDraft(nextKey);
+    setApiKeyError(null);
+  }, [apiKeyDraft]);
+
+  const handleClearApiKey = useCallback(() => {
+    persistApiKey('');
+    setApiKey('');
+    setApiKeyDraft('');
+    setApiKeyError(null);
+  }, []);
+
   /* ---------- Send message via SSE streaming ---------- */
   const handleSend = useCallback(async (text?: string) => {
     const userText = (text ?? input).trim();
     if (!userText || loading) return;
+    if (apiKeyRequired && !apiKey.trim()) {
+      setApiKeyError('请先输入 AI API key');
+      return;
+    }
 
     // Handle slash commands
     if (userText.startsWith('/')) {
@@ -465,18 +541,25 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey.trim() ? { 'X-Easy-SysML-API-Key': apiKey.trim() } : {}),
+        },
         body: JSON.stringify({
           messages: history,
           currentCode: currentCode?.trim() || undefined,
           conversationId: conversationId || undefined,
           autoApply: true,
+          projectId,
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: `请求失败 (${response.status})` }));
+        if (response.status === 401) {
+          setApiKeyError((err as { error?: string }).error || 'AI API key 无效');
+        }
         throw new Error((err as { error?: string }).error || `请求失败 (${response.status})`);
       }
 
@@ -624,7 +707,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setStreamingCodeCount(0);
       abortRef.current = null;
     }
-  }, [aiAvailable, backendStatus, conversationId, currentCode, executeCommand, input, loading, messages, onApplyCode]);
+  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, conversationId, currentCode, executeCommand, input, loading, messages, onApplyCode, projectId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -781,6 +864,51 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         </div>
       )}
 
+      {apiKeyRequired && (
+        <div className="border-b border-[var(--border-color)] bg-[var(--bg-main)] flex-shrink-0">
+          <div className="px-3 py-2.5 space-y-2">
+            <div>
+              <div className="text-[12px] font-semibold text-[var(--text-main)]">AI API Key</div>
+              <div className="text-[11px] text-[var(--text-muted)]">
+                {hasConfiguredApiKey
+                  ? '已配置，将自动附加到 AI 请求。'
+                  : '使用 AI 模块前需要先配置一个已分配的 API key。管理员可在 API Key 管理页创建和吊销 key。'}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKeyDraft}
+                onChange={e => setApiKeyDraft(e.target.value)}
+                placeholder="输入或粘贴 API key"
+                className="flex-1 min-w-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-sidebar)] px-3 py-2 text-[12px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-purple-500/40"
+              />
+              <button
+                onClick={handleSaveApiKey}
+                className="px-3 py-2 rounded-lg bg-purple-500 text-white text-[11px] font-medium hover:bg-purple-600 transition-colors"
+              >
+                保存
+              </button>
+              {hasConfiguredApiKey && (
+                <button
+                  onClick={handleClearApiKey}
+                  className="px-3 py-2 rounded-lg border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+                >
+                  清除
+                </button>
+              )}
+            </div>
+
+            {apiKeyError && (
+              <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-[11px] text-red-600 dark:text-red-400">
+                {apiKeyError}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Messages area ── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         {messages.length === 0 && !loading ? (
@@ -798,7 +926,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider px-1 mb-1">快速开始</div>
               {QUICK_PROMPTS.map((qp, i) => (
-                <button key={i} onClick={() => handleSend(qp.prompt)} disabled={loading || !aiAvailable}
+                <button key={i} onClick={() => handleSend(qp.prompt)} disabled={loading || !chatEnabled}
                   className="w-full text-left p-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group disabled:opacity-50">
                   <div className="flex items-center gap-2">
                     <div className="w-5 h-5 rounded-md bg-purple-500/10 flex items-center justify-center flex-shrink-0">
@@ -855,7 +983,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         )}
         <div className={cn(
           'relative rounded-2xl border transition-all bg-[var(--bg-main)]',
-          loading || !aiAvailable
+          loading || !chatEnabled
             ? 'border-[var(--border-color)] opacity-60'
             : 'border-[var(--border-color)] hover:border-[var(--text-muted)]/40 focus-within:border-purple-500/40 focus-within:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]',
         )}>
@@ -864,8 +992,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={loading ? '生成中…' : aiAvailable ? '向 Agent 发送消息…' : '正在连接后端…'}
-            disabled={loading || !aiAvailable}
+            placeholder={loading ? '生成中…' : !aiAvailable ? '正在连接后端…' : !hasConfiguredApiKey ? '请先配置 API key…' : '向 Agent 发送消息…'}
+            disabled={loading || !chatEnabled}
             rows={1}
             className="w-full bg-transparent px-4 pt-3 pb-1 text-[13px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] resize-none focus:outline-none disabled:cursor-not-allowed min-h-[44px] max-h-[150px]"
             onInput={(e) => {
@@ -903,10 +1031,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             ) : (
               <button
                 onClick={() => handleSend()}
-                disabled={!input.trim() || !aiAvailable}
+                disabled={!input.trim() || !chatEnabled}
                 className={cn(
                   'w-7 h-7 flex items-center justify-center rounded-full transition-all flex-shrink-0',
-                  input.trim() && aiAvailable
+                  input.trim() && chatEnabled
                     ? 'bg-purple-500 text-white hover:bg-purple-600 shadow-sm shadow-purple-500/20'
                     : 'bg-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed',
                 )}
@@ -934,6 +1062,25 @@ const LiveStreamingView: React.FC<{
   mdComponents: Record<string, React.FC<any>>;
 }> = ({ thinking, toolCalls, content, codeCount, mdComponents }) => {
   const hasActions = thinking.length > 0 || toolCalls.length > 0;
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (thinking.length === 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 200);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [thinking.length]);
+
+  const liveThinkingDurationMs = thinking.length > 0
+    ? Math.max(100, now - thinking[0]!.timestamp)
+    : undefined;
 
   return (
     <div className="space-y-2">
@@ -957,7 +1104,7 @@ const LiveStreamingView: React.FC<{
                 正在思考…
               </span>
               <span className="ml-auto text-[10px] text-purple-400 font-medium">
-                {thinking.length} 步
+                {formatDurationLabel(liveThinkingDurationMs)}
               </span>
             </div>
           )}
@@ -1160,7 +1307,7 @@ const ActionHistoryBlock: React.FC<{
       >
         <Play size={10} className="text-[var(--text-muted)] flex-shrink-0" />
         <span className="text-[11px] font-semibold text-[var(--text-muted)] flex-1">
-          Action history · {totalActions} 步
+          Action history · {totalActions} 项
         </span>
         {open ? <ChevronDown size={12} className="text-[var(--text-muted)]" /> : <ChevronRight size={12} className="text-[var(--text-muted)]" />}
       </button>
@@ -1191,9 +1338,7 @@ const ThoughtRow: React.FC<{ steps: ThinkingStep[]; durationMs?: number }> = ({
 }) => {
   const [open, setOpen] = useState(false);
 
-  const durationLabel = durationMs !== undefined
-    ? `${(durationMs / 1000).toFixed(1)} 秒`
-    : `${steps.length} 步`;
+  const durationLabel = formatDurationLabel(durationMs ?? getStepDurationMs(steps));
 
   return (
     <div className="border-b border-[var(--border-color)] last:border-b-0">

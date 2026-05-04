@@ -235,6 +235,7 @@ class InProcessSessionChild
           workload: runtime.baseOptions.workload,
           setSDKStatus: runtime.baseOptions.setSDKStatus,
           structuredIO: this.sessionStructuredIO,
+          suppressHostExit: true,
         },
         )
       })

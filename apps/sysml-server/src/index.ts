@@ -41,6 +41,8 @@ import { filesRouter } from './routes/files.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { chatRouter } from './routes/chat.js';
 import { directChatRouter } from './routes/directChat.js';
+import { adminAuthRouter } from './routes/adminAuth.js';
+import { aiKeysRouter } from './routes/aiKeys.js';
 
 dotenv.config();
 
@@ -72,6 +74,8 @@ app.use(express.json({ limit: '2mb' }));
 app.use('/api/projects', projectsRouter);
 app.use('/api/projects/:projectId/files', filesRouter);
 app.use('/api/projects/:projectId/sessions', sessionsRouter);
+app.use('/api/admin', adminAuthRouter);
+app.use('/api/ai/keys', aiKeysRouter);
 app.use('/api/sessions/:sessionId/chat', chatRouter);
 app.use('/api/chat', directChatRouter);
 
@@ -89,6 +93,8 @@ app.get('/api/status', (_req, res) => {
     configured: true,
     providerLabel: 'free-code',
     free_code_server_url: freeCodeUrl,
+    ai_api_key_required: true,
+    admin_auth_required: true,
   });
 });
 

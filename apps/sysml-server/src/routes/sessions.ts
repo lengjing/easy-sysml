@@ -12,6 +12,7 @@ import { Router, type Request, type Response } from 'express';
 import { resolve, isAbsolute, relative } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db.js';
+import { ensureStoredProjectWorkDir } from '../projectStorage.js';
 
 export const sessionsRouter = Router({ mergeParams: true });
 
@@ -41,22 +42,22 @@ function freeCodeHeaders(): Record<string, string> {
  * Ensures the path is absolute and does not escape allowed boundaries.
  * Falls back to the configured default when cwd is not provided or invalid.
  */
-function resolveWorkDir(cwd: string | undefined): string {
-  const defaultDir = process.env.FREE_CODE_WORK_DIR || process.cwd();
+function resolveWorkDir(defaultDir: string, cwd: string | undefined): string {
+  const workspaceDefault = defaultDir || process.env.FREE_CODE_WORK_DIR || process.cwd();
 
-  if (!cwd) return defaultDir;
+  if (!cwd) return workspaceDefault;
 
   // Resolve to an absolute path
-  const resolved = isAbsolute(cwd) ? resolve(cwd) : resolve(defaultDir, cwd);
+  const resolved = isAbsolute(cwd) ? resolve(cwd) : resolve(workspaceDefault, cwd);
 
   // Reject paths that escape the workspace root.
   // path.relative() returns a string starting with '..' when resolved escapes
   // the workspace root, which is cross-platform safe.
-  const workspaceRoot = resolve(defaultDir);
+  const workspaceRoot = resolve(workspaceDefault);
   const rel = relative(workspaceRoot, resolved);
   if (rel.startsWith('..')) {
     console.warn(`[sysml-server] Rejected cwd outside workspace: ${resolved}`);
-    return defaultDir;
+    return workspaceDefault;
   }
 
   return resolved;
@@ -87,7 +88,7 @@ sessionsRouter.get('/', (req: Request, res: Response) => {
 sessionsRouter.post('/', async (req: Request, res: Response) => {
   const db = getDb();
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId) as
-    | { id: string; name: string }
+    | { id: string; name: string; work_dir?: string }
     | undefined;
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
@@ -114,7 +115,8 @@ sessionsRouter.post('/', async (req: Request, res: Response) => {
   const freeCodeUrl = getFreeCodeServerUrl();
   let freeCodeSessionId: string | undefined;
   let freeCodeWsUrl: string | undefined;
-  let workDir = resolveWorkDir(cwd);
+  const projectWorkDir = ensureStoredProjectWorkDir(project.id, project.work_dir);
+  let workDir = resolveWorkDir(projectWorkDir, cwd);
 
   try {
     const body: Record<string, unknown> = {

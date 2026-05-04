@@ -1,8 +1,14 @@
 import express from 'express';
-import { EventEmitter } from 'node:events';
+import type { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Response } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createAiApiKey } from '../aiKeys.js';
+import { initDb, getDb } from '../db.js';
+import { ensureProjectWorkDir } from '../projectStorage.js';
 
 type MockSocketPlan = (ws: EventEmitter & {
   readyState: number;
@@ -14,9 +20,17 @@ const globalWithPlans = globalThis as typeof globalThis & {
   __directChatWsPlans__?: MockSocketPlan[];
 };
 
-globalWithPlans.__directChatWsPlans__ ??= [];
+const wsPlanState = vi.hoisted(() => {
+  const value = globalThis as typeof globalThis & {
+    __directChatWsPlans__?: MockSocketPlan[];
+  };
+  value.__directChatWsPlans__ ??= [];
+  return value;
+});
 
 vi.mock('ws', () => {
+  const { EventEmitter } = require('node:events') as typeof import('node:events');
+
   class MockWebSocket extends EventEmitter {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
@@ -27,7 +41,7 @@ vi.mock('ws', () => {
 
     constructor(_url: string) {
       super();
-      const plan = globalWithPlans.__directChatWsPlans__?.shift();
+      const plan = wsPlanState.__directChatWsPlans__?.shift();
       queueMicrotask(() => {
         if (plan) {
           plan(this as EventEmitter & {
@@ -107,6 +121,18 @@ function readSseEvents(body: string): SseEvent[] {
 }
 
 async function startDirectChatServer() {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'sysml-direct-chat-test-'));
+  process.env.SYSML_PROJECTS_ROOT = join(tmpRoot, 'projects');
+  initDb(join(tmpRoot, 'sysml.db'));
+  const db = getDb();
+  const projectId = 'project-1';
+  const workDir = ensureProjectWorkDir(projectId);
+  const now = Date.now();
+  db.prepare(
+    'INSERT INTO projects (id, name, description, work_dir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(projectId, 'Project 1', '', workDir, now, now);
+  const { plaintextKey } = createAiApiKey('Test key');
+
   const app = express();
   app.use(express.json());
   app.use('/api/chat', directChatRouter);
@@ -123,6 +149,8 @@ async function startDirectChatServer() {
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
+    apiKey: plaintextKey,
+    projectId,
     close: () => new Promise<void>((resolve, reject) => {
       server.close(error => {
         if (error) reject(error);
@@ -364,6 +392,7 @@ describe('handleFreeCodeMsg', () => {
 describe('directChatRouter', () => {
   const realFetch = globalThis.fetch;
   const realFreeCodeUrl = process.env.FREE_CODE_SERVER_URL;
+  const realProjectsRoot = process.env.SYSML_PROJECTS_ROOT;
   let server: Awaited<ReturnType<typeof startDirectChatServer>> | undefined;
 
   beforeEach(async () => {
@@ -379,10 +408,46 @@ describe('directChatRouter', () => {
     } else {
       process.env.FREE_CODE_SERVER_URL = realFreeCodeUrl;
     }
+    if (realProjectsRoot === undefined) {
+      delete process.env.SYSML_PROJECTS_ROOT;
+    } else {
+      process.env.SYSML_PROJECTS_ROOT = realProjectsRoot;
+    }
     if (server) {
       await server.close();
       server = undefined;
     }
+  });
+
+  it('rejects chat requests without an API key', async () => {
+    const response = await fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'AI API key is required' });
+  });
+
+  it('rejects chat requests when the API key balance is exhausted', async () => {
+    const { plaintextKey } = createAiApiKey('Exhausted key', 0);
+
+    const response = await fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': plaintextKey,
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    });
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toEqual({ error: 'AI API key balance exhausted, recharge required' });
   });
 
   it('recreates a stale free-code session on the next turn of the same conversation', async () => {
@@ -397,7 +462,7 @@ describe('directChatRouter', () => {
       },
     ];
 
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const url = String(input);
       if (url.startsWith('http://fake-free-code/')) {
         const next = createdSessions.shift();
@@ -441,20 +506,28 @@ describe('directChatRouter', () => {
 
     const firstResponse = await fetch(`${server!.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
       body: JSON.stringify({
         conversationId: 'conv-1',
         messages: [{ role: 'user', content: 'first question' }],
+        projectId: server!.projectId,
       }),
     });
     const firstEvents = readSseEvents(await firstResponse.text());
 
     const secondResponse = await fetch(`${server!.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
       body: JSON.stringify({
         conversationId: 'conv-1',
         messages: [{ role: 'user', content: 'second question' }],
+        projectId: server!.projectId,
       }),
     });
     const secondEvents = readSseEvents(await secondResponse.text());
