@@ -77,7 +77,7 @@ export async function startServer(
     }
 
     if (method === 'GET' && url === '/sessions') {
-      return jsonResponse(res, 200, sessions.list())
+      return jsonResponse(res, 200, await sessions.list())
     }
 
     if (method === 'POST' && url === '/sessions') {
@@ -92,7 +92,7 @@ export async function startServer(
       }
 
       try {
-        const session = sessions.create({
+        const session = await sessions.create({
           allowedTools: Array.isArray(body.allowed_tools)
             ? (body.allowed_tools as string[])
             : undefined,

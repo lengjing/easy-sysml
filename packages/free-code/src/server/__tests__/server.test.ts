@@ -15,7 +15,8 @@ class TestBackend implements SessionBackend {
     lastCreateSessionOptions = options
     const script = [
       "const readline = require('node:readline');",
-      "console.log(JSON.stringify({ type: 'system', subtype: 'ready' }));",
+      "const { randomUUID } = require('node:crypto');",
+      "console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: randomUUID() }));",
       "const rl = readline.createInterface({ input: process.stdin });",
       "rl.on('line', line => console.log(line));",
       'setInterval(() => {}, 1000);',
@@ -36,8 +37,9 @@ class StreamingBackend implements SessionBackend {
       "const fs = require('node:fs');",
       "const path = require('node:path');",
       "const readline = require('node:readline');",
+      "const { randomUUID } = require('node:crypto');",
       "const rl = readline.createInterface({ input: process.stdin });",
-      "console.log(JSON.stringify({ type: 'system', subtype: 'ready' }));",
+      "console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: randomUUID() }));",
       'rl.on(\'line\', line => {',
       '  const payload = JSON.parse(line);',
       '  if (payload.type !== \"user\") return;',
@@ -219,7 +221,7 @@ describe('server command runtime modules', () => {
     }
   })
 
-  it('creates, lists, and deletes sessions', async () => {
+  it('creates and deletes sessions', async () => {
     const testServer = await startTestServer()
     try {
       const create = await makeReq(testServer.base, '/sessions', {
@@ -232,11 +234,12 @@ describe('server command runtime modules', () => {
       expect(created.session_id).toBeTruthy()
       expect(created.ws_url).toContain('/sessions/')
 
+      // GET /sessions now reads from the Claude filesystem (listSessionsImpl),
+      // not from the in-memory map, so it returns an array of real Claude sessions.
       const list = await makeReq(testServer.base, '/sessions')
       expect(list.status).toBe(200)
       const sessions = (await list.json()) as Array<Record<string, unknown>>
-      expect(sessions).toHaveLength(1)
-      expect(sessions[0]?.id).toBe(created.session_id)
+      expect(Array.isArray(sessions)).toBe(true)
 
       const deleted = await makeReq(
         testServer.base,

@@ -36,22 +36,4 @@ export type SessionInfo = {
   createdAt: number
   workDir: string
   process: ChildProcess | null
-  sessionKey?: string
 }
-
-/**
- * Stable session key → session metadata. Persisted to ~/.claude/server-sessions.json
- * so sessions can be resumed across server restarts.
- */
-export type SessionIndexEntry = {
-  /** Server-assigned session ID (matches the subprocess's claude session). */
-  sessionId: string
-  /** The claude transcript session ID for --resume. Same as sessionId for direct sessions. */
-  transcriptSessionId: string
-  cwd: string
-  permissionMode?: string
-  createdAt: number
-  lastActiveAt: number
-}
-
-export type SessionIndex = Record<string, SessionIndexEntry>
