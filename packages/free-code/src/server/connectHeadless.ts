@@ -1,98 +1,52 @@
 /* eslint-disable eslint-plugin-n/no-unsupported-features/node-builtins */
 
-import type { SDKMessage, SDKResultMessage } from '../entrypoints/agentSdkTypes.js'
-import { peekForStdinData, registerProcessOutputErrorHandlers, writeToStderr, writeToStdout } from '../utils/process.js'
-import { jsonStringify } from '../utils/slowOperations.js'
-import type { DirectConnectConfig } from './directConnectManager.js'
+import { createInterface } from 'readline'
+import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
+import {
+  type DirectConnectConfig,
+  DirectConnectSessionManager,
+} from './directConnectManager.js'
 
-type HeadlessMessage = SDKMessage & {
-  request_id?: string
-  request?: { subtype?: string }
-  response?: unknown
-  content?: string
-  exit_code?: number | null
-}
+type OutputFormat = 'text' | 'json' | 'stream-json'
 
-function appendAuthToken(wsUrl: string, authToken?: string): string {
-  if (!authToken) {
-    return wsUrl
-  }
-
-  const url = new URL(wsUrl)
-  if (!url.searchParams.has('token')) {
-    url.searchParams.set('token', authToken)
-  }
-  return url.toString()
-}
-
-function isResultMessage(message: HeadlessMessage): message is SDKResultMessage {
-  return message.type === 'result'
-}
-
-function writeResult(result: SDKResultMessage, outputFormat: string): void {
-  switch (outputFormat) {
-    case 'json':
-      writeToStdout(jsonStringify(result) + '\n')
-      return
-    case 'stream-json':
-      return
-    default:
-      if (result.subtype === 'success') {
-        const text = result.result ?? ''
-        writeToStdout(text.endsWith('\n') ? text : `${text}\n`)
-        return
-      }
-
-      switch (result.subtype) {
-        case 'error_during_execution':
-          writeToStdout('Execution error\n')
-          return
-        case 'error_max_turns':
-          writeToStdout('Error: Reached max turns\n')
-          return
-        case 'error_max_budget_usd':
-          writeToStdout('Error: Exceeded USD budget\n')
-          return
-        case 'error_max_structured_output_retries':
-          writeToStdout(
-            'Error: Failed to provide valid structured output after maximum retries\n',
-          )
-          return
-      }
-  }
-}
-
-async function readPromptFromStdin(): Promise<string> {
-  if (process.stdin.isTTY) {
+function extractAssistantText(message: SDKMessage): string {
+  if (message.type !== 'assistant') {
     return ''
   }
 
-  const timedOut = await peekForStdinData(process.stdin, 50)
-  if (timedOut) {
+  const blocks = message.message?.content
+  if (!Array.isArray(blocks)) {
     return ''
   }
 
-  process.stdin.setEncoding('utf8')
-  let data = ''
-  for await (const chunk of process.stdin) {
-    data += chunk
+  const parts: string[] = []
+  for (const block of blocks) {
+    if (
+      typeof block === 'object' &&
+      block !== null &&
+      'type' in block &&
+      (block as { type?: unknown }).type === 'text' &&
+      'text' in block
+    ) {
+      const text = (block as { text?: unknown }).text
+      if (typeof text === 'string') {
+        parts.push(text)
+      }
+    }
   }
-  return data
+
+  return parts.join('')
 }
 
-function createPermissionDeniedResponse(requestId: string): string {
-  return jsonStringify({
-    type: 'control_response',
-    response: {
-      subtype: 'success',
-      request_id: requestId,
-      response: {
-        behavior: 'deny',
-        message:
-          'Headless direct connect does not support interactive permission prompts; rerun with --dangerously-skip-permissions.',
-      },
-    },
-  })
+function writeStreamJson(message: SDKMessage): void {
+  process.stdout.write(`${JSON.stringify(message)}\n`)
+}
+
+function writeText(text: string): void {
+  if (!text) {
+    return
+  }
+  process.stdout.write(`${text}\n`)
 }
 
 export async function runConnectHeadless(
@@ -101,143 +55,73 @@ export async function runConnectHeadless(
   outputFormat: string,
   interactive: boolean,
 ): Promise<void> {
-  registerProcessOutputErrorHandlers()
+  const format: OutputFormat =
+    outputFormat === 'json' || outputFormat === 'stream-json'
+      ? outputFormat
+      : 'text'
 
-  const effectivePrompt = prompt.trim() ? prompt : await readPromptFromStdin()
-  if (!effectivePrompt.trim()) {
-    writeToStderr(
-      'Error: Input must be provided either through stdin or as a prompt argument when using open -p\n',
-    )
-    process.exitCode = 1
-    return
-  }
-
-  if (!interactive && !prompt.trim()) {
-    writeToStderr(
-      'Error: open requires -p/--print for headless direct-connect mode\n',
-    )
-    process.exitCode = 1
-    return
-  }
-
-  const wsUrl = appendAuthToken(config.wsUrl, config.authToken)
-  const socket = new WebSocket(wsUrl)
-
-  let lastResult: SDKResultMessage | undefined
-  let sessionExitCode: number | null | undefined
-  let serverError: string | undefined
-
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      socket.removeEventListener('open', onOpen)
-      socket.removeEventListener('message', onMessage)
-      socket.removeEventListener('error', onError)
-      socket.removeEventListener('close', onClose)
-    }
-
-    const finish = () => {
-      cleanup()
-      resolve()
-    }
-
-    const fail = (error: Error) => {
-      cleanup()
-      reject(error)
-    }
-
-    const onOpen = () => {
-      socket.send(
-        jsonStringify({
-          type: 'user',
-          message: {
-            role: 'user',
-            content: effectivePrompt,
-          },
-          parent_tool_use_id: null,
-          session_id: '',
-        }),
-      )
-    }
-
-    const onMessage = (event: MessageEvent) => {
-      const data = typeof event.data === 'string' ? event.data : String(event.data)
-      const lines = data.split('\n').filter(line => line.trim())
-
-      for (const line of lines) {
-        const parsed = JSON.parse(line) as HeadlessMessage
-
-        if (parsed.type === 'server_error') {
-          serverError = parsed.content ?? 'Unknown server error'
-          writeToStderr(serverError.endsWith('\n') ? serverError : `${serverError}\n`)
-          continue
-        }
-
-        if (parsed.type === 'server_session_done') {
-          sessionExitCode = parsed.exit_code ?? null
-          if (lastResult || sessionExitCode !== null) {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.close()
-            }
-            finish()
-          }
-          continue
-        }
-
-        if (outputFormat === 'stream-json') {
-          writeToStdout(line.endsWith('\n') ? line : `${line}\n`)
-        }
-
-        if (parsed.type === 'control_request' && parsed.request_id) {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(createPermissionDeniedResponse(parsed.request_id))
-          }
-          continue
-        }
-
-        if (isResultMessage(parsed)) {
-          lastResult = parsed
-          if (outputFormat !== 'stream-json') {
-            writeResult(parsed, outputFormat)
-          }
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close()
-          }
-          finish()
-          return
-        }
-      }
-    }
-
-    const onError = () => {
-      fail(new Error(`Failed to connect to server at ${config.serverUrl}`))
-    }
-
-    const onClose = () => {
-      if (lastResult) {
-        finish()
-        return
-      }
-
-      if (serverError) {
-        fail(new Error(serverError))
-        return
-      }
-
-      if (sessionExitCode !== undefined && sessionExitCode !== 0) {
-        fail(new Error(`Remote session exited with code ${sessionExitCode}`))
-        return
-      }
-
-      finish()
-    }
-
-    socket.addEventListener('open', onOpen)
-    socket.addEventListener('message', onMessage)
-    socket.addEventListener('error', onError)
-    socket.addEventListener('close', onClose)
+  let lastAssistantText = ''
+  let doneResolve: (() => void) | null = null
+  const done = new Promise<void>(resolve => {
+    doneResolve = resolve
   })
 
-  if (lastResult?.is_error) {
-    process.exitCode = 1
-  }
+  const manager = new DirectConnectSessionManager(config, {
+    onConnected: () => {
+      if (prompt) {
+        manager.sendMessage(prompt)
+      }
+
+      if (interactive) {
+        const rl = createInterface({
+          input: process.stdin,
+          crlfDelay: Infinity,
+        })
+        rl.on('line', line => {
+          const trimmed = line.trim()
+          if (!trimmed) {
+            return
+          }
+          manager.sendMessage(trimmed)
+        })
+      }
+    },
+    onMessage: message => {
+      if (format === 'stream-json') {
+        writeStreamJson(message)
+      }
+
+      const text = extractAssistantText(message)
+      if (text) {
+        lastAssistantText = text
+        if (format === 'text') {
+          writeText(text)
+        }
+      }
+
+      if (message.type === 'result' && !interactive) {
+        if (format === 'json') {
+          process.stdout.write(`${JSON.stringify({ result: lastAssistantText })}\n`)
+        }
+        doneResolve?.()
+      }
+    },
+    onPermissionRequest: (_request, requestId) => {
+      manager.respondToPermissionRequest(requestId, {
+        behavior: 'deny',
+        message: 'Headless mode does not support interactive permission prompts',
+      })
+    },
+    onDisconnected: () => {
+      doneResolve?.()
+    },
+    onError: err => {
+      process.stderr.write(`${err.message}\n`)
+      doneResolve?.()
+    },
+  })
+
+  manager.connect()
+  await done
+  manager.disconnect()
 }

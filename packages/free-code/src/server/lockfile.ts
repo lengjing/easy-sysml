@@ -1,20 +1,28 @@
-import { promises as fs } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { join } from 'path'
+import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 
-export type RunningServerLock = {
-  host: string
-  httpUrl: string
+type ServerLock = {
   pid: number
   port: number
+  host: string
+  httpUrl: string
   startedAt: number
 }
 
-function getLockfilePath(): string {
-  return (
-    process.env.CLAUDE_CODE_SERVER_LOCKFILE ??
-    join(homedir(), '.claude', 'server-lock.json')
-  )
+function getLockPath(): string {
+  return join(getClaudeConfigHomeDir(), 'server.lock.json')
+}
+
+export async function writeServerLock(lock: ServerLock): Promise<void> {
+  const lockPath = getLockPath()
+  await mkdir(getClaudeConfigHomeDir(), { recursive: true })
+  await writeFile(lockPath, JSON.stringify(lock), 'utf8')
+}
+
+export async function removeServerLock(): Promise<void> {
+  const lockPath = getLockPath()
+  await rm(lockPath, { force: true })
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -26,30 +34,25 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-export async function writeServerLock(lock: RunningServerLock): Promise<void> {
-  const lockfilePath = getLockfilePath()
-  await fs.mkdir(dirname(lockfilePath), { recursive: true })
-  await fs.writeFile(lockfilePath, JSON.stringify(lock, null, 2), 'utf8')
-}
-
-export async function removeServerLock(): Promise<void> {
+export async function probeRunningServer(): Promise<ServerLock | null> {
+  const lockPath = getLockPath()
+  let parsed: ServerLock
   try {
-    await fs.rm(getLockfilePath(), { force: true })
-  } catch {
-    // Ignore best-effort cleanup failures.
-  }
-}
-
-export async function probeRunningServer(): Promise<RunningServerLock | null> {
-  try {
-    const raw = await fs.readFile(getLockfilePath(), 'utf8')
-    const parsed = JSON.parse(raw) as RunningServerLock
-    if (!isProcessAlive(parsed.pid)) {
-      await removeServerLock()
-      return null
-    }
-    return parsed
+    const raw = await readFile(lockPath, 'utf8')
+    parsed = JSON.parse(raw) as ServerLock
   } catch {
     return null
   }
+
+  if (!parsed || typeof parsed.pid !== 'number') {
+    await removeServerLock()
+    return null
+  }
+
+  if (!isProcessAlive(parsed.pid)) {
+    await removeServerLock()
+    return null
+  }
+
+  return parsed
 }

@@ -204,7 +204,6 @@ function PluginComponentsDisplay({
     skills?: string | string[] | Record<string, unknown> | null;
     hooks?: unknown;
     mcpServers?: unknown;
-    lspServers?: unknown;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -219,14 +218,12 @@ function PluginComponentsDisplay({
             const skillNames = builtinDef.skills?.map(s => s.name) ?? [];
             const hookEvents = builtinDef.hooks ? Object.keys(builtinDef.hooks) : [];
             const mcpServerNames = builtinDef.mcpServers ? Object.keys(builtinDef.mcpServers) : [];
-            const lspServerNames = builtinDef.lspServers ? Object.keys(builtinDef.lspServers) : [];
             setComponents({
               commands: null,
               agents: null,
               skills: skillNames.length > 0 ? skillNames : null,
               hooks: hookEvents.length > 0 ? hookEvents : null,
-              mcpServers: mcpServerNames.length > 0 ? mcpServerNames : null,
-              lspServers: lspServerNames.length > 0 ? lspServerNames : null
+              mcpServers: mcpServerNames.length > 0 ? mcpServerNames : null
             });
           } else {
             setError(`Built-in plugin ${plugin.name} not found`);
@@ -313,20 +310,12 @@ function PluginComponentsDisplay({
           if (pluginEntry.mcpServers) {
             mcpServersList.push(pluginEntry.mcpServers);
           }
-          const lspServersList = [];
-          if (plugin.lspServers) {
-            lspServersList.push(Object.keys(plugin.lspServers));
-          }
-          if (pluginEntry.lspServers) {
-            lspServersList.push(pluginEntry.lspServers);
-          }
           setComponents({
             commands: commandList.length > 0 ? commandList : null,
             agents: agentList.length > 0 ? agentList : null,
             skills: skillList.length > 0 ? skillList : null,
             hooks: hooksList.length > 0 ? hooksList : null,
-            mcpServers: mcpServersList.length > 0 ? mcpServersList : null,
-            lspServers: lspServersList.length > 0 ? lspServersList : null
+            mcpServers: mcpServersList.length > 0 ? mcpServersList : null
           });
         } else {
           setError(`Plugin ${plugin.name} not found in marketplace`);
@@ -338,7 +327,7 @@ function PluginComponentsDisplay({
       }
     }
     void loadComponents();
-  }, [plugin.name, plugin.commandsPath, plugin.commandsPaths, plugin.agentsPath, plugin.agentsPaths, plugin.skillsPath, plugin.skillsPaths, plugin.hooksConfig, plugin.mcpServers, plugin.lspServers, marketplace]);
+  }, [plugin.name, plugin.commandsPath, plugin.commandsPaths, plugin.agentsPath, plugin.agentsPaths, plugin.skillsPath, plugin.skillsPaths, plugin.hooksConfig, plugin.mcpServers, marketplace]);
   if (loading) {
     return null; // Don't show loading state for cleaner UI
   }
@@ -351,7 +340,7 @@ function PluginComponentsDisplay({
   if (!components) {
     return null; // No components info available
   }
-  const hasComponents = components.commands || components.agents || components.skills || components.hooks || components.mcpServers || components.lspServers;
+  const hasComponents = components.commands || components.agents || components.skills || components.hooks || components.mcpServers;
   if (!hasComponents) {
     return null; // No components defined
   }
@@ -376,10 +365,6 @@ function PluginComponentsDisplay({
       {components.mcpServers ? <Text dimColor>
           • MCP Servers:{' '}
           {typeof components.mcpServers === 'string' ? components.mcpServers : Array.isArray(components.mcpServers) ? components.mcpServers.map(String).join(', ') : typeof components.mcpServers === 'object' && components.mcpServers !== null ? Object.keys(components.mcpServers).join(', ') : String(components.mcpServers)}
-        </Text> : null}
-      {components.lspServers ? <Text dimColor>
-          • LSP Servers:{' '}
-          {typeof components.lspServers === 'string' ? components.lspServers : Array.isArray(components.lspServers) ? components.lspServers.map(String).join(', ') : typeof components.lspServers === 'object' && components.lspServers !== null ? Object.keys(components.lspServers).join(', ') : String(components.lspServers)}
         </Text> : null}
     </Box>;
 }

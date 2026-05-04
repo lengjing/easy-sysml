@@ -1,17 +1,23 @@
 export type ServerLogger = {
-  error: (message: string, error?: unknown) => void
   info: (message: string) => void
+  warn: (message: string) => void
+  error: (message: string) => void
+}
+
+function stamp(level: string, message: string): string {
+  return `[claude-server ${level}] ${message}`
 }
 
 export function createServerLogger(): ServerLogger {
   return {
-    error(message: string, error?: unknown) {
-      const suffix =
-        error instanceof Error ? `\n${error.stack ?? error.message}` : error ? `\n${String(error)}` : ''
-      process.stderr.write(`${message}${suffix}\n`)
-    },
     info(message: string) {
-      process.stderr.write(`${message}\n`)
+      process.stderr.write(`${stamp('info', message)}\n`)
+    },
+    warn(message: string) {
+      process.stderr.write(`${stamp('warn', message)}\n`)
+    },
+    error(message: string) {
+      process.stderr.write(`${stamp('error', message)}\n`)
     },
   }
 }

@@ -3,6 +3,3 @@ dist/
 cli
 cli-dev
 openclaw/
-cli.exe
-cli-dev.exe
-.env

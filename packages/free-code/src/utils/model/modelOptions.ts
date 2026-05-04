@@ -1,10 +1,12 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { getInitialMainLoopModel } from '../../bootstrap/state.js'
 import {
+  getOpenAICompatibleModel,
   isClaudeAISubscriber,
   isCodexSubscriber,
   isMaxSubscriber,
   isTeamPremiumSubscriber,
+  isOpenAICompatibleProvider,
 } from '../auth.js'
 import { getModelStrings } from './modelStrings.js'
 import {
@@ -33,7 +35,6 @@ import {
 } from './model.js'
 import { has1mContext } from '../context.js'
 import { getGlobalConfig } from '../config.js'
-import { getOpenAICompatModelOptions } from './openaiCompat.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 
@@ -238,15 +239,6 @@ function getGpt54MiniOption(): ModelOption {
   }
 }
 
-function getOpenAICompatProviderOptions(): ModelOption[] {
-  return getOpenAICompatModelOptions().map(option => ({
-    value: option.id,
-    label: option.label,
-    description: option.description,
-    descriptionForModel: option.description,
-  }))
-}
-
 function getMaxOpusOption(fastMode = false): ModelOption {
   return {
     value: 'opus',
@@ -336,6 +328,10 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     ]
   }
 
+  if (isOpenAICompatibleProvider()) {
+    return [getDefaultOptionForUser(fastMode)]
+  }
+
   if (isClaudeAISubscriber()) {
     if (isMaxSubscriber() || isTeamPremiumSubscriber()) {
       // Max and Team Premium users: Opus is default, show Sonnet as alternative
@@ -370,13 +366,6 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
 
     standardOptions.push(MaxHaiku45Option)
     return standardOptions
-  }
-
-  if (getAPIProvider() === 'openai-compat') {
-    return [
-      getDefaultOptionForUser(fastMode),
-      ...getOpenAICompatProviderOptions(),
-    ]
   }
 
   // PAYG 1P API: Default (Sonnet) + Sonnet 1M + Opus 4.6 + Opus 1M + Haiku
@@ -516,6 +505,18 @@ function getKnownModelOption(model: string): ModelOption | null {
 
 export function getModelOptions(fastMode = false): ModelOption[] {
   const options = getModelOptionsBase(fastMode)
+
+  const openAICompatibleModel = getOpenAICompatibleModel()
+  if (
+    openAICompatibleModel &&
+    !options.some(existing => existing.value === openAICompatibleModel)
+  ) {
+    options.push({
+      value: openAICompatibleModel,
+      label: openAICompatibleModel,
+      description: `OpenAI-compatible model (${openAICompatibleModel})`,
+    })
+  }
 
   // Add the custom model from the ANTHROPIC_CUSTOM_MODEL_OPTION env var
   const envCustomModel = process.env.ANTHROPIC_CUSTOM_MODEL_OPTION

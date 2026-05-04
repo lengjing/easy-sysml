@@ -1,11 +1,7 @@
 import type { ModelName } from './model.js'
 import type { APIProvider } from './providers.js'
 
-type StaticModelProvider = Exclude<APIProvider, 'openai-compat'>
-
-// OpenAI-compat model routing is provider-preset-dependent (DeepSeek/Qwen/etc.),
-// so this table only captures the static provider IDs.
-export type ModelConfig = Record<StaticModelProvider, ModelName>
+export type ModelConfig = Record<APIProvider, ModelName>
 
 // @[MODEL LAUNCH]: Add a new CLAUDE_*_CONFIG constant here. Double check the correct model strings
 // here since the pattern may change.
@@ -123,55 +119,6 @@ export const GPT_5_4_MINI_CONFIG = {
   openai: 'gpt-5.4-mini',
 } as const satisfies ModelConfig
 
-// OpenAI-compatible native models
-export const DEEPSEEK_V4_FLASH_CONFIG = {
-  firstParty: 'deepseek-v4-flash',
-  bedrock: 'deepseek-v4-flash',
-  vertex: 'deepseek-v4-flash',
-  foundry: 'deepseek-v4-flash',
-  openai: 'deepseek-v4-flash',
-} as const satisfies ModelConfig
-
-export const DEEPSEEK_V4_PRO_CONFIG = {
-  firstParty: 'deepseek-v4-pro',
-  bedrock: 'deepseek-v4-pro',
-  vertex: 'deepseek-v4-pro',
-  foundry: 'deepseek-v4-pro',
-  openai: 'deepseek-v4-pro',
-} as const satisfies ModelConfig
-
-export const DEEPSEEK_CHAT_CONFIG = {
-  firstParty: 'deepseek-chat',
-  bedrock: 'deepseek-chat',
-  vertex: 'deepseek-chat',
-  foundry: 'deepseek-chat',
-  openai: 'deepseek-chat',
-} as const satisfies ModelConfig
-
-export const DEEPSEEK_REASONER_CONFIG = {
-  firstParty: 'deepseek-reasoner',
-  bedrock: 'deepseek-reasoner',
-  vertex: 'deepseek-reasoner',
-  foundry: 'deepseek-reasoner',
-  openai: 'deepseek-reasoner',
-} as const satisfies ModelConfig
-
-export const QWEN_PLUS_CONFIG = {
-  firstParty: 'qwen-plus',
-  bedrock: 'qwen-plus',
-  vertex: 'qwen-plus',
-  foundry: 'qwen-plus',
-  openai: 'qwen-plus',
-} as const satisfies ModelConfig
-
-export const QWEN_MAX_CONFIG = {
-  firstParty: 'qwen-max',
-  bedrock: 'qwen-max',
-  vertex: 'qwen-max',
-  foundry: 'qwen-max',
-  openai: 'qwen-max',
-} as const satisfies ModelConfig
-
 // @[MODEL LAUNCH]: Register the new config here.
 export const ALL_MODEL_CONFIGS = {
   haiku35: CLAUDE_3_5_HAIKU_CONFIG,
@@ -189,13 +136,6 @@ export const ALL_MODEL_CONFIGS = {
   gpt54: GPT_5_4_CONFIG,
   gpt53codex: GPT_5_3_CODEX_CONFIG,
   gpt54mini: GPT_5_4_MINI_CONFIG,
-  // OpenAI-compatible native models
-  deepseekV4Flash: DEEPSEEK_V4_FLASH_CONFIG,
-  deepseekV4Pro: DEEPSEEK_V4_PRO_CONFIG,
-  deepseekChat: DEEPSEEK_CHAT_CONFIG,
-  deepseekReasoner: DEEPSEEK_REASONER_CONFIG,
-  qwenPlus: QWEN_PLUS_CONFIG,
-  qwenMax: QWEN_MAX_CONFIG,
 } as const satisfies Record<string, ModelConfig>
 
 export type ModelKey = keyof typeof ALL_MODEL_CONFIGS

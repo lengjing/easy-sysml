@@ -810,8 +810,8 @@ export function initialPermissionModeFromCLI({
   return result
 }
 
-export function parseToolListFromCLI(tools: string[]): string[] {
-  if (tools.length === 0) {
+export function parseToolListFromCLI(tools?: readonly string[]): string[] {
+  if (!tools || tools.length === 0) {
     return []
   }
 
@@ -870,19 +870,19 @@ export function parseToolListFromCLI(tools: string[]): string[] {
 }
 
 export async function initializeToolPermissionContext({
-  allowedToolsCli,
-  disallowedToolsCli,
-  baseToolsCli,
+  allowedToolsCli = [],
+  disallowedToolsCli = [],
+  baseToolsCli = [],
   permissionMode,
   allowDangerouslySkipPermissions,
-  addDirs,
+  addDirs = [],
 }: {
-  allowedToolsCli: string[]
-  disallowedToolsCli: string[]
+  allowedToolsCli?: string[]
+  disallowedToolsCli?: string[]
   baseToolsCli?: string[]
   permissionMode: PermissionMode
   allowDangerouslySkipPermissions: boolean
-  addDirs: string[]
+  addDirs?: string[]
 }): Promise<{
   toolPermissionContext: ToolPermissionContext
   warnings: string[]
