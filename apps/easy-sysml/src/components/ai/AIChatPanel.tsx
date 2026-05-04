@@ -10,6 +10,7 @@
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Sparkles, Plus, Loader2,
   AlertCircle, Brain, Terminal,
@@ -258,6 +259,26 @@ const markdownComponents = {
   ),
   blockquote: ({ children, ...props }: React.HTMLAttributes<HTMLQuoteElement>) => (
     <blockquote className="border-l-2 border-purple-500/30 pl-3 my-1.5 text-[var(--text-muted)]" {...props}>{children}</blockquote>
+  ),
+  table: ({ children, ...props }: React.HTMLAttributes<HTMLTableElement>) => (
+    <div className="my-2 overflow-x-auto rounded-lg border border-[var(--border-color)]">
+      <table className="min-w-full text-[12px] border-collapse" {...props}>{children}</table>
+    </div>
+  ),
+  thead: ({ children, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) => (
+    <thead className="bg-[var(--bg-main)]/80" {...props}>{children}</thead>
+  ),
+  tbody: ({ children, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) => (
+    <tbody {...props}>{children}</tbody>
+  ),
+  tr: ({ children, ...props }: React.HTMLAttributes<HTMLTableRowElement>) => (
+    <tr className="border-b border-[var(--border-color)] last:border-b-0" {...props}>{children}</tr>
+  ),
+  th: ({ children, ...props }: React.HTMLAttributes<HTMLTableCellElement>) => (
+    <th className="px-3 py-1.5 text-left font-semibold text-[var(--text-main)] border-r border-[var(--border-color)] last:border-r-0" {...props}>{children}</th>
+  ),
+  td: ({ children, ...props }: React.HTMLAttributes<HTMLTableCellElement>) => (
+    <td className="px-3 py-1.5 text-[var(--text-main)] border-r border-[var(--border-color)] last:border-r-0" {...props}>{children}</td>
   ),
 };
 
@@ -636,6 +657,14 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   }, [handleSend]);
 
   const handleNewChat = useCallback(() => {
+    // If the current session has no messages, don't create another empty one — 
+    // just close the sessions panel and focus the input instead.
+    const currentMessages = chatSessionsRef.current.messages;
+    if (currentMessages.length === 0 && !loading) {
+      setShowSessions(false);
+      setTimeout(() => inputRef.current?.focus(), 50);
+      return;
+    }
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     chatSessions.newSession();
     setInput('');
@@ -644,7 +673,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     setStreamingToolCalls([]);
     setStreamingCodeCount(0);
     setShowSessions(false);
-  }, [chatSessions]);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [chatSessions, loading]);
 
   const switchToSession = useCallback((sessionId: string) => {
     if (loading) return;
@@ -664,6 +694,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   }, [chatSessions]);
 
   const mdComponents = useMemo(() => markdownComponents, []);
+  const mdRemarkPlugins = useMemo(() => [remarkGfm], []);
 
   const { messages, sessions, activeSessionId, conversationId } = chatSessions;
 
@@ -875,7 +906,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         ) : (
           <div className="p-3 space-y-4">
             {messages.map(msg => (
-              <MessageBubble key={msg.id} msg={msg} mdComponents={mdComponents} />
+              <MessageBubble key={msg.id} msg={msg} mdComponents={mdComponents} remarkPlugins={mdRemarkPlugins} />
             ))}
 
             {/* Live streaming area */}
@@ -886,6 +917,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 content={streamingContent}
                 codeCount={streamingCodeCount}
                 mdComponents={mdComponents}
+                remarkPlugins={mdRemarkPlugins}
               />
             )}
           </div>
@@ -994,7 +1026,8 @@ const LiveStreamingView: React.FC<{
   content: string;
   codeCount: number;
   mdComponents: Record<string, React.FC<any>>;
-}> = ({ thinking, toolCalls, content, codeCount, mdComponents }) => {
+  remarkPlugins?: any[];
+}> = ({ thinking, toolCalls, content, codeCount, mdComponents, remarkPlugins }) => {
   const hasActions = thinking.length > 0 || toolCalls.length > 0;
   const [now, setNow] = useState(Date.now());
 
@@ -1062,7 +1095,7 @@ const LiveStreamingView: React.FC<{
       {content ? (
         <div className="ml-8">
           <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-            <Markdown components={mdComponents}>{content}</Markdown>
+            <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{content}</Markdown>
             <span className="inline-block w-1.5 h-3.5 bg-purple-500 animate-pulse ml-0.5 -mb-0.5 rounded-sm" />
           </div>
         </div>
@@ -1122,7 +1155,8 @@ const LiveActionRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
 const MessageBubble: React.FC<{
   msg: ChatMessage;
   mdComponents: Record<string, React.FC<any>>;
-}> = React.memo(({ msg, mdComponents }) => {
+  remarkPlugins?: any[];
+}> = React.memo(({ msg, mdComponents, remarkPlugins }) => {
 
   /* ── User message ── */
   if (msg.role === 'user') {
@@ -1210,7 +1244,7 @@ const MessageBubble: React.FC<{
         {/* Response text */}
         {msg.content.trim() && (
           <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-            <Markdown components={mdComponents}>{msg.content}</Markdown>
+            <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
           </div>
         )}
       </div>
@@ -1281,15 +1315,15 @@ const ThoughtRow: React.FC<{ steps: ThinkingStep[]; durationMs?: number }> = ({
         className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-purple-500/5 transition-colors text-left"
       >
         <Brain size={13} className="text-purple-500 flex-shrink-0" />
-        <span className="text-[12px] text-[var(--text-main)] flex-1">
+        <span className="text-[12px] text-[var(--text-main)] flex-1 min-w-0 truncate">
           Thought for <span className="font-semibold">{durationLabel}</span>
         </span>
-        {open ? <ChevronDown size={11} className="text-[var(--text-muted)]" /> : <ChevronRight size={11} className="text-[var(--text-muted)]" />}
+        {open ? <ChevronDown size={11} className="text-[var(--text-muted)] flex-shrink-0" /> : <ChevronRight size={11} className="text-[var(--text-muted)] flex-shrink-0" />}
       </button>
       {open && (
         <div className="px-4 pb-3 pt-1 bg-purple-500/3 border-t border-purple-500/10 space-y-1.5 max-h-[200px] overflow-y-auto custom-scrollbar">
           {steps.map((step, i) => (
-            <p key={i} className="text-[11px] text-[var(--text-muted)] leading-relaxed whitespace-pre-wrap">
+            <p key={i} className="text-[11px] text-[var(--text-muted)] leading-relaxed break-words">
               {step.content}
             </p>
           ))}
