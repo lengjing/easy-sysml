@@ -276,7 +276,12 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
         const isTemp = currentActiveId.startsWith('temp-');
 
         if (isTemp) {
-          if (messages.length === 0) return;
+          if (messages.length === 0) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[easy-sysml] setMessages([]) called for a temp session — skipping create.');
+            }
+            return;
+          }
           // Create new server session
           void createChatSession(projectId, {
             title: deriveTitle(messages),

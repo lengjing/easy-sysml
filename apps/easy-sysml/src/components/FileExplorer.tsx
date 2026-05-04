@@ -178,9 +178,14 @@ function FileTreeNode({
     e.stopPropagation();
     setIsDragOver(false);
     const draggedId = e.dataTransfer.getData('text/plain');
-    if (draggedId && draggedId !== node.id) {
-      onMoveNode?.(draggedId, node.id);
-    }
+    if (!draggedId || draggedId === node.id) return;
+    // Prevent dropping a folder into one of its own descendants (circular hierarchy)
+    const isDescendant = (ancestorId: string, targetId: string): boolean =>
+      getChildren(ancestorId).some(
+        child => child.id === targetId || isDescendant(child.id, targetId),
+      );
+    if (isDescendant(draggedId, node.id)) return;
+    onMoveNode?.(draggedId, node.id);
   };
 
   const Icon = isDir ? (isOpen ? FolderOpen : Folder) : FileCode;

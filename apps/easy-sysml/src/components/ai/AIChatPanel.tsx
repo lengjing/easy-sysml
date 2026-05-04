@@ -768,6 +768,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             {hasConfiguredApiKey && (
               <button
                 onClick={handleClearApiKey}
+                aria-label="清除 API Key"
                 className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:text-red-500 hover:border-red-500/30 transition-colors"
               >
                 清除
