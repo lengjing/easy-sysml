@@ -368,18 +368,13 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
       const node = fs.getNode(id);
       const fileIds = collectDescendantFileIds(fs, id);
 
-      // Collect all remote IDs to delete (files and the root node if it's a dir)
+      // Collect remote IDs to delete:
+      // - If the root node has a remoteId, the server handles recursive deletion.
+      // - Otherwise fall back to collecting individual file remote IDs.
       const remoteNodeIds: string[] = [];
       if (node?.remoteId) {
-        // If it's a directory with a remoteId, we only need to delete the directory
-        // (the server deletes recursively). Otherwise collect file IDs.
-        if (node.type === 'directory') {
-          remoteNodeIds.push(node.remoteId);
-        } else {
-          remoteNodeIds.push(node.remoteId);
-        }
+        remoteNodeIds.push(node.remoteId);
       } else {
-        // Fallback: collect remote IDs of individual files
         for (const fileId of fileIds) {
           const fileNode = fs.getNode(fileId);
           if (fileNode?.remoteId) remoteNodeIds.push(fileNode.remoteId);

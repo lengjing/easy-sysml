@@ -262,7 +262,11 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
       flushTimerRef.current = setTimeout(() => {
         flushTimerRef.current = null;
         if (!projectId) return;
-        const session = sessions.find(s => s.id === activeId) ?? { ...getActiveSession(), messages };
+        // Re-read from the session list; if the session is gone (e.g. was deleted
+        // while the debounce was pending), skip the persist.
+        const currentSession = sessions.find(s => s.id === activeId);
+        if (!currentSession) return;
+
         const isTemp = activeId.startsWith('temp-');
 
         if (isTemp) {
@@ -290,7 +294,7 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
           // Update existing session
           void Promise.all([
             saveChatSessionMessages(projectId, activeId, messages),
-            title !== session.title
+            title !== currentSession.title
               ? updateChatSession(projectId, activeId, { title })
               : Promise.resolve(),
           ]).catch(error => {
@@ -299,7 +303,7 @@ export function useChatSessions(projectId?: string): UseChatSessionsReturn {
         }
       }, 800);
     },
-    [activeSessionId, getActiveSession, patchSession, projectId, sessions],
+    [activeSessionId, patchSession, projectId, sessions],
   );
 
   /* -- setConversationId -- */

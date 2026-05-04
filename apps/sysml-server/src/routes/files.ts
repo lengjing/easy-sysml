@@ -165,15 +165,45 @@ filesRouter.get('/:nodeId', (req: Request, res: Response) => {
     return;
   }
 
-  // Return the specific node from a scan (cheaper than full scan for single file)
-  const nodes = scanProjectDirectory(workDir);
-  const node = nodes.find(n => n.path === nodePath);
-  if (!node) {
+  // Read file directly from disk (no full directory scan needed)
+  const absPath = pathResolve(workDir, ...nodePath.split('/'));
+  let stat: ReturnType<typeof statSync>;
+  try {
+    stat = statSync(absPath);
+  } catch {
     res.status(404).json({ error: 'File not found' });
     return;
   }
 
-  res.json(node);
+  const name = nodePath.split('/').pop() ?? nodePath;
+  if (stat.isDirectory()) {
+    res.json({
+      id: encodeNodeId(nodePath),
+      type: 'directory',
+      path: nodePath,
+      name,
+      created_at: stat.birthtimeMs || stat.ctimeMs,
+      updated_at: stat.mtimeMs,
+    });
+    return;
+  }
+
+  let content = '';
+  try {
+    content = readFileSync(absPath, 'utf8');
+  } catch {
+    // Return empty content for unreadable files
+  }
+
+  res.json({
+    id: encodeNodeId(nodePath),
+    type: 'file',
+    path: nodePath,
+    name,
+    content,
+    created_at: stat.birthtimeMs || stat.ctimeMs,
+    updated_at: stat.mtimeMs,
+  });
 });
 
 /* ------------------------------------------------------------------ */
