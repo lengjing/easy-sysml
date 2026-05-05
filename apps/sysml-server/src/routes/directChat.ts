@@ -289,10 +289,14 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 
     ws.on('open', () => {
       state.lastActiveAt = Date.now();
+      // Must match SDKUserMessage format expected by --input-format stream-json
       ws.send(
         JSON.stringify({
           type: 'user',
-          message: userMessage,
+          message: {
+            role: 'user',
+            content: userMessage,
+          },
           parent_tool_use_id: null,
           session_id: state.freeCodeSessionId,
         }),
