@@ -151,6 +151,7 @@ async function startDirectChatServer() {
     baseUrl: `http://127.0.0.1:${address.port}`,
     apiKey: plaintextKey,
     projectId,
+    workDir,
     close: () => new Promise<void>((resolve, reject) => {
       server.close(error => {
         if (error) reject(error);
@@ -259,6 +260,59 @@ describe('handleFreeCodeMsg', () => {
 
     expect(recorder.readEvents()).toEqual([
       { event: 'delta', data: { content: 'streamed token' } },
+    ]);
+  });
+
+  it('forwards both assistant_partial and stream_event text deltas incrementally', () => {
+    const recorder = createResponseRecorder();
+    const streamState = {
+      sawPartialText: false,
+      sawPartialThinking: false,
+    };
+
+    handleFreeCodeMsg(
+      recorder.res,
+      {
+        type: 'assistant_partial',
+        delta: '当前工作目录',
+      },
+      new Map(),
+      true,
+      streamState,
+    );
+
+    handleFreeCodeMsg(
+      recorder.res,
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          delta: {
+            type: 'text_delta',
+            text: '当前工作目录是：',
+          },
+        },
+      },
+      new Map(),
+      true,
+      streamState,
+    );
+
+    handleFreeCodeMsg(
+      recorder.res,
+      {
+        type: 'assistant_partial',
+        delta: '不该再追加',
+      },
+      new Map(),
+      true,
+      streamState,
+    );
+
+    expect(recorder.readEvents()).toEqual([
+      { event: 'delta', data: { content: '当前工作目录' } },
+      { event: 'delta', data: { content: '当前工作目录是：' } },
+      { event: 'delta', data: { content: '不该再追加' } },
     ]);
   });
 
@@ -448,6 +502,208 @@ describe('directChatRouter', () => {
 
     expect(response.status).toBe(402);
     await expect(response.json()).resolves.toEqual({ error: 'AI API key balance exhausted, recharge required' });
+  });
+
+  it('creates free-code sessions with the project workDir as cwd', async () => {
+    const createdSessionBodies: Array<Record<string, unknown>> = [];
+
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input);
+      if (url.startsWith('http://fake-free-code/')) {
+        createdSessionBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+        return new Response(JSON.stringify({
+          session_id: 'session-project-cwd',
+          ws_url: 'ws://fake-free-code/sessions/session-project-cwd/ws',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    globalWithPlans.__directChatWsPlans__!.push(ws => {
+      ws.readyState = 1;
+      ws.emit('open');
+      queueMicrotask(() => {
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({ type: 'result', result: 'ok' }) + '\n'),
+        );
+      });
+    });
+
+    const response = await fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
+      body: JSON.stringify({
+        message: 'inspect cwd',
+        projectId: server!.projectId,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(createdSessionBodies).toHaveLength(1);
+    expect(createdSessionBodies[0]).toMatchObject({
+      cwd: server!.workDir,
+      permission_mode: 'acceptEdits',
+    });
+    expect(createdSessionBodies[0]).not.toHaveProperty('dangerously_skip_permissions');
+  });
+
+  it('denies permission control requests from direct chat sessions', async () => {
+    const sentMessages: Array<Record<string, unknown>> = [];
+
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input);
+      if (url.startsWith('http://fake-free-code/')) {
+        return new Response(JSON.stringify({
+          session_id: 'session-permission-deny',
+          ws_url: 'ws://fake-free-code/sessions/session-permission-deny/ws',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    globalWithPlans.__directChatWsPlans__!.push(ws => {
+      ws.send = ((chunk: string) => {
+        sentMessages.push(JSON.parse(chunk) as Record<string, unknown>);
+      }) as typeof ws.send;
+      ws.readyState = 1;
+      ws.emit('open');
+      queueMicrotask(() => {
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({
+            type: 'control_request',
+            request_id: 'permission-1',
+            request: {
+              subtype: 'can_use_tool',
+              tool_name: 'Read',
+              input: { file_path: 'D:\\workspace\\code\\easy-sysml' },
+              tool_use_id: 'tool-1',
+            },
+          }) + '\n'),
+        );
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({ type: 'result', result: 'ok' }) + '\n'),
+        );
+      });
+    });
+
+    const response = await fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
+      body: JSON.stringify({
+        message: 'read parent directory',
+        projectId: server!.projectId,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await response.text();
+
+    expect(sentMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'user',
+          message: { role: 'user', content: 'read parent directory' },
+        }),
+        {
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: 'permission-1',
+            response: {
+              behavior: 'deny',
+              message:
+                `Access outside the project working directory is forbidden in direct chat and cannot be approved. Only files under ${server!.workDir} are accessible. Do not ask the user for permission; explain the restriction instead.`,
+            },
+          },
+        },
+      ]),
+    );
+  });
+
+  it('replays prior conversation history before sending the current user message to a fresh session', async () => {
+    const sentMessages: Array<Record<string, unknown>> = [];
+
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input);
+      if (url.startsWith('http://fake-free-code/')) {
+        return new Response(JSON.stringify({
+          session_id: 'session-history-replay',
+          ws_url: 'ws://fake-free-code/sessions/session-history-replay/ws',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    globalWithPlans.__directChatWsPlans__!.push(ws => {
+      ws.send = ((chunk: string) => {
+        sentMessages.push(JSON.parse(chunk) as Record<string, unknown>);
+      }) as typeof ws.send;
+      ws.readyState = 1;
+      ws.emit('open');
+      queueMicrotask(() => {
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({ type: 'result', result: 'ok' }) + '\n'),
+        );
+      });
+    });
+
+    const response = await fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
+      body: JSON.stringify({
+        message: 'third turn',
+        messages: [
+          { role: 'user', content: 'first turn' },
+          { role: 'assistant', content: 'second turn' },
+          { role: 'user', content: 'third turn' },
+        ],
+        projectId: server!.projectId,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(sentMessages).toHaveLength(3);
+    expect(sentMessages[0]).toMatchObject({
+      type: 'user',
+      message: { role: 'user', content: 'first turn' },
+      isReplay: true,
+    });
+    expect(sentMessages[1]).toMatchObject({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'second turn' }],
+      },
+      isReplay: true,
+    });
+    expect(sentMessages[2]).toMatchObject({
+      type: 'user',
+      message: { role: 'user', content: 'third turn' },
+      session_id: 'session-history-replay',
+    });
   });
 
   it('recreates a stale free-code session on the next turn of the same conversation', async () => {

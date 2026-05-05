@@ -27,6 +27,7 @@ import {
   type ThinkingStep,
   type ToolCall,
 } from '../../hooks/useChatSessions';
+import { extractSseEvents } from './sse';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -478,6 +479,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     let turnMessages = [...turnStartMessages];
 
     try {
+      const requestMessages = turnStartMessages
+        .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        }));
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -486,6 +494,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         },
         body: JSON.stringify({
           message: userText,
+          messages: requestMessages,
           conversationId: chatSessionsRef.current.conversationId || undefined,
           autoApply: true,
           projectId,
@@ -512,120 +521,145 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
+        const parsed = extractSseEvents(buffer);
+        buffer = parsed.remainder;
 
-        let currentEvent = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ') && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              switch (currentEvent) {
-                case 'session': {
-                  if (data.conversationId) {
-                    chatSessionsRef.current.setConversationId(data.conversationId);
-                  }
-                  break;
+        for (const event of parsed.events) {
+          try {
+            const data = JSON.parse(event.data);
+            switch (event.event) {
+              case 'session': {
+                if (data.conversationId) {
+                  chatSessionsRef.current.setConversationId(data.conversationId);
                 }
-                case 'thinking': {
-                  const now = Date.now();
-                  if (thinkingStartTsRef.current === null) {
-                    thinkingStartTsRef.current = now;
-                  }
-                  const step: ThinkingStep = { content: data.content, timestamp: now };
-                  thinkingAcc.push(step);
-                  setStreamingThinking([...thinkingAcc]);
-                  break;
+                break;
+              }
+              case 'thinking': {
+                const now = Date.now();
+                if (thinkingStartTsRef.current === null) {
+                  thinkingStartTsRef.current = now;
                 }
-                case 'delta': {
-                  if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
-                    thinkingEndTsRef.current = Date.now();
-                  }
-                  contentAcc += data.content;
-                  setStreamingContent(contentAcc);
-                  break;
+                const step: ThinkingStep = { content: data.content, timestamp: now };
+                thinkingAcc.push(step);
+                setStreamingThinking([...thinkingAcc]);
+                break;
+              }
+              case 'delta': {
+                if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
+                  thinkingEndTsRef.current = Date.now();
                 }
-                case 'code': {
-                  codeCount++;
-                  setStreamingCodeCount(codeCount);
-                  if (data.autoApply && data.content) {
-                    onApplyCode(data.content);
-                  }
-                  break;
+                contentAcc += typeof data.content === 'string' ? data.content : String(data.content ?? '');
+                setStreamingContent(contentAcc);
+                break;
+              }
+              case 'code': {
+                codeCount++;
+                setStreamingCodeCount(codeCount);
+                if (data.autoApply && data.content) {
+                  onApplyCode(data.content);
                 }
-                case 'tool_call': {
-                  if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
-                    thinkingEndTsRef.current = Date.now();
-                  }
-                  const tc: ToolCall = {
-                    id: data.id,
-                    name: data.name || 'unknown',
-                    input: data.input,
-                    status: data.status,
-                    result: data.result,
-                    timestamp: Date.now(),
-                  };
-                  let existingIdx = -1;
-                  if (data.id && data.status !== 'running') {
-                    for (let i = toolCallAcc.length - 1; i >= 0; i--) {
-                      if (toolCallAcc[i].id === data.id && toolCallAcc[i].status === 'running') {
-                        existingIdx = i;
-                        break;
-                      }
+                break;
+              }
+              case 'tool_call': {
+                if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
+                  thinkingEndTsRef.current = Date.now();
+                }
+                const tc: ToolCall = {
+                  id: data.id,
+                  name: data.name || 'unknown',
+                  input: data.input,
+                  status: data.status,
+                  result: data.result,
+                  timestamp: Date.now(),
+                };
+                let existingIdx = -1;
+                if (data.id && data.status !== 'running') {
+                  for (let i = toolCallAcc.length - 1; i >= 0; i--) {
+                    if (toolCallAcc[i].id === data.id && toolCallAcc[i].status === 'running') {
+                      existingIdx = i;
+                      break;
                     }
                   }
-                  if (existingIdx >= 0) {
-                    toolCallAcc[existingIdx] = tc;
-                  } else {
-                    toolCallAcc.push(tc);
-                  }
-                  setStreamingToolCalls([...toolCallAcc]);
-                  break;
                 }
-                case 'result': {
-                  if (typeof data.duration_ms === 'number') {
-                    durationMs = data.duration_ms;
-                  }
-                  break;
+                if (existingIdx >= 0) {
+                  toolCallAcc[existingIdx] = tc;
+                } else {
+                  toolCallAcc.push(tc);
                 }
-                case 'error': {
-                  const errorMsg: ChatMessage = {
-                    id: makeId(), role: 'error', content: data.content,
-                    thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
-                    codesSynced: codeCount, timestamp: Date.now(),
-                  };
-                  turnMessages = [...turnMessages, errorMsg];
-                  chatSessionsRef.current.setMessages(turnMessages);
-                  break;
-                }
-                case 'done': {
-                  if (contentAcc.trim() || codeCount > 0 || toolCallAcc.length > 0) {
-                    const thinkingDurationMs =
-                      thinkingStartTsRef.current !== null && thinkingEndTsRef.current !== null
-                        ? thinkingEndTsRef.current - thinkingStartTsRef.current
-                        : thinkingAcc.length > 0 && durationMs
-                        ? Math.min(durationMs * THINKING_DURATION_ESTIMATE_RATIO, MAX_THINKING_DURATION_MS)
-                        : undefined;
-                    const assistantMsg: ChatMessage = {
-                      id: makeId(), role: 'assistant', content: contentAcc,
-                      provider: backendStatus?.providerLabel || 'free-code',
-                      thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
-                      codesSynced: codeCount, durationMs, thinkingDurationMs,
-                      timestamp: Date.now(),
-                    };
-                    turnMessages = [...turnMessages, assistantMsg];
-                    chatSessionsRef.current.setMessages(turnMessages);
-                  }
-                  break;
-                }
+                setStreamingToolCalls([...toolCallAcc]);
+                break;
               }
-            } catch {
-              // skip
+              case 'result': {
+                if (typeof data.duration_ms === 'number') {
+                  durationMs = data.duration_ms;
+                }
+                break;
+              }
+              case 'error': {
+                const errorMsg: ChatMessage = {
+                  id: makeId(), role: 'error', content: data.content,
+                  thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
+                  codesSynced: codeCount, timestamp: Date.now(),
+                };
+                turnMessages = [...turnMessages, errorMsg];
+                chatSessionsRef.current.setMessages(turnMessages);
+                break;
+              }
+              case 'done': {
+                if (contentAcc.trim() || codeCount > 0 || toolCallAcc.length > 0) {
+                  const thinkingDurationMs =
+                    thinkingStartTsRef.current !== null && thinkingEndTsRef.current !== null
+                      ? thinkingEndTsRef.current - thinkingStartTsRef.current
+                      : thinkingAcc.length > 0 && durationMs
+                      ? Math.min(durationMs * THINKING_DURATION_ESTIMATE_RATIO, MAX_THINKING_DURATION_MS)
+                      : undefined;
+                  const assistantMsg: ChatMessage = {
+                    id: makeId(), role: 'assistant', content: contentAcc,
+                    provider: backendStatus?.providerLabel || 'free-code',
+                    thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
+                    codesSynced: codeCount, durationMs, thinkingDurationMs,
+                    timestamp: Date.now(),
+                  };
+                  turnMessages = [...turnMessages, assistantMsg];
+                  chatSessionsRef.current.setMessages(turnMessages);
+                }
+                break;
+              }
             }
-            currentEvent = '';
+          } catch {
+            // skip malformed event payloads
           }
+        }
+      }
+
+      buffer += decoder.decode();
+      const parsed = extractSseEvents(buffer);
+      for (const event of parsed.events) {
+        try {
+          const data = JSON.parse(event.data);
+          if (event.event === 'done') {
+            if (contentAcc.trim() || codeCount > 0 || toolCallAcc.length > 0) {
+              const thinkingDurationMs =
+                thinkingStartTsRef.current !== null && thinkingEndTsRef.current !== null
+                  ? thinkingEndTsRef.current - thinkingStartTsRef.current
+                  : thinkingAcc.length > 0 && durationMs
+                  ? Math.min(durationMs * THINKING_DURATION_ESTIMATE_RATIO, MAX_THINKING_DURATION_MS)
+                  : undefined;
+              const assistantMsg: ChatMessage = {
+                id: makeId(), role: 'assistant', content: contentAcc,
+                provider: backendStatus?.providerLabel || 'free-code',
+                thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
+                codesSynced: codeCount, durationMs, thinkingDurationMs,
+                timestamp: Date.now(),
+              };
+              turnMessages = [...turnMessages, assistantMsg];
+              chatSessionsRef.current.setMessages(turnMessages);
+            }
+          } else if (event.event === 'result' && typeof data.duration_ms === 'number') {
+            durationMs = data.duration_ms;
+          }
+        } catch {
+          // skip malformed event payloads
         }
       }
     } catch (err: unknown) {
@@ -1045,7 +1079,7 @@ const LiveStreamingView: React.FC<{
     : undefined;
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {/* Copilot label + spinner */}
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-semibold text-[var(--text-main)]">Copilot</span>
@@ -1054,7 +1088,7 @@ const LiveStreamingView: React.FC<{
 
       {/* Live action history */}
       {hasActions && (
-        <div className="ml-8 rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] overflow-hidden">
+        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-main)] overflow-hidden">
           {/* Thinking row — live */}
           {thinking.length > 0 && (
             <div className="flex items-center gap-2.5 px-3 py-2 border-b border-[var(--border-color)] last:border-b-0">
@@ -1085,14 +1119,12 @@ const LiveStreamingView: React.FC<{
 
       {/* Streaming response text */}
       {content ? (
-        <div className="ml-8">
-          <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-            <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{content}</Markdown>
-            <span className="inline-block w-1.5 h-3.5 bg-purple-500 animate-pulse ml-0.5 -mb-0.5 rounded-sm" />
-          </div>
+        <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
+          <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{content}</Markdown>
+          <span className="inline-block w-1.5 h-3.5 bg-purple-500 animate-pulse ml-0.5 -mb-0.5 rounded-sm" />
         </div>
       ) : !hasActions ? (
-        <div className="ml-8 text-[12px] text-[var(--text-muted)]">
+        <div className="text-[12px] text-[var(--text-muted)]">
           正在生成…
         </div>
       ) : null}

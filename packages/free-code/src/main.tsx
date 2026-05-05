@@ -4004,19 +4004,22 @@ async function run(): Promise<CommanderCommand> {
       idleTimeoutMs: parseInt(opts.idleTimeout ?? '600000', 10),
       maxSessions: parseInt(opts.maxSessions ?? '32', 10)
     };
-    const sessionCwd = opts.workspace || getCwd();
-    let sharedServerRuntimePromise: Promise<{
+    const serverWorkspaceCwd = opts.workspace || getCwd();
+    const sharedServerRuntimePromises = new Map<string, Promise<{
       commands: Awaited<ReturnType<typeof getCommands>>;
       agentDefinitions: Awaited<ReturnType<typeof getAgentDefinitionsWithOverrides>>;
       toolPermissionContext: Awaited<ReturnType<typeof initializeToolPermissionContext>>['toolPermissionContext'];
-    }> | null = null;
+    }>>();
     const backend = new DangerousBackend({
       createRuntime: async sessionOpts => {
+        const runtimeCwd = sessionOpts.cwd || serverWorkspaceCwd;
+        let sharedServerRuntimePromise = sharedServerRuntimePromises.get(runtimeCwd);
+
         if (!sharedServerRuntimePromise) {
           sharedServerRuntimePromise = (async () => {
             enableConfigs();
-            const commands = (await getCommands(sessionCwd)).filter(command => command.type === 'prompt' && !command.disableNonInteractive || command.type === 'local' && command.supportsNonInteractive);
-            const agentDefinitions = await getAgentDefinitionsWithOverrides(sessionCwd);
+            const commands = (await getCommands(runtimeCwd)).filter(command => command.type === 'prompt' && !command.disableNonInteractive || command.type === 'local' && command.supportsNonInteractive);
+            const agentDefinitions = await getAgentDefinitionsWithOverrides(runtimeCwd);
             const permissionInit = await initializeToolPermissionContext({
               allowedToolsCli: [],
               disallowedToolsCli: [],
@@ -4031,13 +4034,21 @@ async function run(): Promise<CommanderCommand> {
               toolPermissionContext: permissionInit.toolPermissionContext
             };
           })();
+          sharedServerRuntimePromises.set(runtimeCwd, sharedServerRuntimePromise);
         }
         const shared = await sharedServerRuntimePromise;
         const defaultState = getDefaultAppState();
-        const sessionPermissionContext = sessionOpts.dangerouslySkipPermissions ? {
-          ...shared.toolPermissionContext,
-          mode: 'bypassPermissions'
-        } : shared.toolPermissionContext;
+        const sessionPermissionContext = sessionOpts.dangerouslySkipPermissions
+          ? {
+              ...shared.toolPermissionContext,
+              mode: 'bypassPermissions'
+            }
+          : sessionOpts.permissionMode === 'acceptEdits'
+            ? {
+                ...shared.toolPermissionContext,
+                mode: 'acceptEdits'
+              }
+            : shared.toolPermissionContext;
         const initialState = {
           ...defaultState,
           toolPermissionContext: sessionPermissionContext,

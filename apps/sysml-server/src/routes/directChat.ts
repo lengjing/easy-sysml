@@ -45,9 +45,18 @@ interface StreamState {
   sawPartialThinking: boolean;
 }
 
+interface ConversationHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 const conversations = new Map<string, ConversationState>();
 const DIRECT_CHAT_SESSION_MAX_AGE_MS = 9 * 60 * 1000;
 const MAX_TOOL_RESULT = 800;
+
+function buildDirectChatPermissionDeniedMessage(workDir: string): string {
+  return `Access outside the project working directory is forbidden in direct chat and cannot be approved. Only files under ${workDir} are accessible. Do not ask the user for permission; explain the restriction instead.`;
+}
 
 function getFreeCodeUrl(): string {
   return process.env.FREE_CODE_SERVER_URL || 'http://localhost:3002';
@@ -136,8 +145,8 @@ async function createFreeCodeSession(
         method: 'POST',
         headers: freeCodeHeaders(),
         body: JSON.stringify({
-          dangerously_skip_permissions: true,
           cwd: workDir,
+          permission_mode: 'acceptEdits',
           system_prompt: SYSML_SYSTEM_PROMPT,
         }),
       });
@@ -167,17 +176,113 @@ async function createFreeCodeSession(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+function isControlRequestMessage(
+  msg: Record<string, unknown>,
+): msg is {
+  type: 'control_request';
+  request_id: string;
+  request: { subtype?: unknown };
+} {
+  return (
+    msg.type === 'control_request' &&
+    typeof msg.request_id === 'string' &&
+    !!msg.request &&
+    typeof msg.request === 'object'
+  );
+}
+
+function normalizeConversationHistory(
+  rawMessages: unknown,
+  currentUserMessage: string,
+): ConversationHistoryMessage[] {
+  if (!Array.isArray(rawMessages)) {
+    return [];
+  }
+
+  const normalized = rawMessages
+    .map(message => {
+      if (!message || typeof message !== 'object') {
+        return null;
+      }
+
+      const role = (message as { role?: unknown }).role;
+      const content = (message as { content?: unknown }).content;
+      if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string') {
+        return null;
+      }
+
+      const trimmed = content.trim();
+      if (!trimmed) {
+        return null;
+      }
+
+      return {
+        role,
+        content: trimmed,
+      } satisfies ConversationHistoryMessage;
+    })
+    .filter((message): message is ConversationHistoryMessage => message !== null);
+
+  const lastMessage = normalized.at(-1);
+  if (lastMessage?.role === 'user' && lastMessage.content === currentUserMessage) {
+    return normalized.slice(0, -1);
+  }
+
+  return normalized;
+}
+
+function replayConversationHistory(
+  ws: WebSocket,
+  messages: ConversationHistoryMessage[],
+): void {
+  for (const message of messages) {
+    if (message.role === 'user') {
+      ws.send(
+        JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: message.content,
+          },
+          parent_tool_use_id: null,
+          session_id: '',
+          isReplay: true,
+        }),
+      );
+      continue;
+    }
+
+    ws.send(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'text',
+              text: message.content,
+            },
+          ],
+        },
+        session_id: '',
+        isReplay: true,
+      }),
+    );
+  }
+}
+
 directChatRouter.post('/', async (req: Request, res: Response) => {
   const {
     message,
     conversationId: clientConvId,
     autoApply = true,
     projectId,
+    messages,
   } = req.body as {
     message?: string;
     conversationId?: string;
     autoApply?: boolean;
     projectId?: string;
+    messages?: Array<{ role?: string; content?: string }>;
   };
 
   const apiKeyValue = req.header('x-easy-sysml-api-key')?.trim();
@@ -202,6 +307,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'message is required' });
     return;
   }
+  const conversationHistory = normalizeConversationHistory(messages, userMessage);
 
   const requestedProjectId = typeof projectId === 'string' && projectId.trim() ? projectId.trim() : undefined;
   let chatContext: { projectId: string | null; workDir: string };
@@ -226,6 +332,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 
   const convId = clientConvId || uuidv4();
   let convState = conversations.get(convId);
+  const needsFreshSession = !convState;
   const shouldRefreshSession = convState
     ? Date.now() - convState.lastActiveAt > DIRECT_CHAT_SESSION_MAX_AGE_MS ||
       convState.projectId !== chatContext.projectId ||
@@ -252,7 +359,11 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 
   sseWrite(res, 'session', { conversationId: convId });
 
-  function connectAndStream(state: ConversationState, isRetry: boolean): void {
+  function connectAndStream(
+    state: ConversationState,
+    isRetry: boolean,
+    shouldReplayHistory: boolean,
+  ): void {
     const ws = new WebSocket(buildWsUrl(state.freeCodeWsUrl));
     let finished = false;
     let receivedAnyMessage = false;
@@ -276,6 +387,9 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 
     ws.on('open', () => {
       state.lastActiveAt = Date.now();
+      if (shouldReplayHistory && conversationHistory.length > 0) {
+        replayConversationHistory(ws, conversationHistory);
+      }
       // Must match SDKUserMessage format expected by --input-format stream-json
       ws.send(
         JSON.stringify({
@@ -298,7 +412,28 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
         if (!trimmed) continue;
 
         try {
-          const msg = JSON.parse(trimmed) as Record<string, unknown>;
+          const parsedMsg = JSON.parse(trimmed) as Record<string, unknown>;
+          if (
+            isControlRequestMessage(parsedMsg) &&
+            parsedMsg.request.subtype === 'can_use_tool'
+          ) {
+            const denyMessage = buildDirectChatPermissionDeniedMessage(state.workDir);
+            ws.send(
+              JSON.stringify({
+                type: 'control_response',
+                response: {
+                  subtype: 'success',
+                  request_id: parsedMsg.request_id,
+                  response: {
+                    behavior: 'deny',
+                    message: denyMessage,
+                  },
+                },
+              }),
+            );
+            continue;
+          }
+          const msg = parsedMsg;
           if (msg.type === 'result' && !usageRecorded) {
             usageRecorded = true;
             recordAiApiKeyUsage(
@@ -328,7 +463,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
         createFreeCodeSession(state.workDir, state.projectId)
           .then(fresh => {
             conversations.set(convId, fresh);
-            connectAndStream(fresh, true);
+            connectAndStream(fresh, true, true);
           })
           .catch((sessionErr: unknown) => {
             const message = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
@@ -352,7 +487,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
         createFreeCodeSession(state.workDir, state.projectId)
           .then(fresh => {
             conversations.set(convId, fresh);
-            connectAndStream(fresh, true);
+            connectAndStream(fresh, true, true);
           })
           .catch((sessionErr: unknown) => {
             const message = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
@@ -368,7 +503,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     });
   }
 
-  connectAndStream(convState, false);
+  connectAndStream(convState, false, needsFreshSession || shouldRefreshSession);
 });
 
 export function handleFreeCodeMsg(

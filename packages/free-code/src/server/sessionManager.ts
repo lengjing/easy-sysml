@@ -16,6 +16,7 @@ export type SessionBackend = {
   spawnSession(opts: {
     cwd: string
     dangerouslySkipPermissions?: boolean
+    permissionMode?: 'acceptEdits'
     resumeSessionId?: string
   }): Promise<{ child: ServerSessionProcess; workDir: string }>
 }
@@ -107,6 +108,7 @@ export class SessionManager {
   async createSession(opts: {
     cwd: string
     dangerouslySkipPermissions?: boolean
+    permissionMode?: 'acceptEdits'
   }): Promise<{ id: string; workDir: string }> {
     const maxSessions = this.options.maxSessions ?? 0
     if (maxSessions > 0 && this.sessions.size >= maxSessions) {

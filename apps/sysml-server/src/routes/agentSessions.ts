@@ -121,12 +121,12 @@ agentSessionsRouter.post('/', async (req: Request, res: Response) => {
   try {
     const body: Record<string, unknown> = {
       dangerously_skip_permissions: dangerouslySkipPermissions,
+      cwd: workDir,
     };
     if (model) body.model = model;
     if (systemPrompt) body.system_prompt = systemPrompt;
     if (maxTurns !== undefined) body.max_turns = maxTurns;
     if (allowedTools) body.allowed_tools = allowedTools;
-    if (cwd) body.cwd = cwd;
 
     const resp = await fetch(`${freeCodeUrl}/sessions`, {
       method: 'POST',

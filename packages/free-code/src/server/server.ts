@@ -45,11 +45,13 @@ function getWsUrl(req: Request, config: ServerConfig, sessionId: string): string
 async function parseCreateBody(req: Request): Promise<{
   cwd?: string
   dangerously_skip_permissions?: boolean
+  permission_mode?: 'acceptEdits'
 }> {
   try {
     return (await req.json()) as {
       cwd?: string
       dangerously_skip_permissions?: boolean
+      permission_mode?: 'acceptEdits'
     }
   } catch {
     return {}
@@ -116,6 +118,7 @@ export function startServer(
           const created = await sessionManager.createSession({
             cwd,
             dangerouslySkipPermissions: body.dangerously_skip_permissions,
+            permissionMode: body.permission_mode,
           })
 
           return new Response(
