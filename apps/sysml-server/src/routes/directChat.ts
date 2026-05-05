@@ -21,7 +21,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
 import { authenticateAiApiKey, recordAiApiKeyUsage, type AiApiUsage } from '../aiKeys.js';
@@ -30,7 +30,12 @@ import { ensureStoredProjectWorkDir } from '../projectStorage.js';
 
 export const directChatRouter = Router();
 
-const SYSML_SYSTEM_PROMPT = `You are a professional SysML v2 Copilot embedded in the easy-sysml IDE. Help the user design, create, and modify SysML v2 models. Always respond in the same language as the user (Chinese or English).`;
+function buildSysmlSystemPrompt(workDir: string): string {
+  return `You are a professional SysML v2 Copilot embedded in the easy-sysml IDE. Help the user design, create, and modify SysML v2 models. Always respond in the same language as the user (Chinese or English).
+
+Your current working directory is: ${workDir}
+All file operations should be performed within this directory. Do not access files or run commands outside this working directory.`;
+}
 
 interface ConversationState {
   freeCodeSessionId: string;
@@ -38,6 +43,13 @@ interface ConversationState {
   lastActiveAt: number;
   projectId: string | null;
   workDir: string;
+  /**
+   * Promise that resolves when the current in-flight turn completes.
+   * Used to serialize turns: a new turn must wait for the previous one to
+   * finish before opening a WebSocket to the session, preventing a second
+   * request from receiving messages that belong to the first request.
+   */
+  pendingTurn: Promise<void>;
 }
 
 interface StreamState {
@@ -147,7 +159,7 @@ async function createFreeCodeSession(
         body: JSON.stringify({
           cwd: workDir,
           permission_mode: 'acceptEdits',
-          system_prompt: SYSML_SYSTEM_PROMPT,
+          system_prompt: buildSysmlSystemPrompt(workDir),
         }),
       });
 
@@ -167,6 +179,7 @@ async function createFreeCodeSession(
         lastActiveAt: Date.now(),
         projectId,
         workDir,
+        pendingTurn: Promise.resolve(),
       };
     } catch (error) {
       lastError = error;
@@ -176,19 +189,80 @@ async function createFreeCodeSession(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-function isControlRequestMessage(
-  msg: Record<string, unknown>,
-): msg is {
+interface CanUseToolRequest {
   type: 'control_request';
   request_id: string;
-  request: { subtype?: unknown };
-} {
+  request: {
+    subtype: 'can_use_tool';
+    tool_name?: string;
+    input?: Record<string, unknown>;
+    blocked_path?: string;
+  };
+}
+
+function isCanUseToolMessage(msg: unknown): msg is CanUseToolRequest {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const m = msg as Record<string, unknown>;
   return (
-    msg.type === 'control_request' &&
-    typeof msg.request_id === 'string' &&
-    !!msg.request &&
-    typeof msg.request === 'object'
+    m.type === 'control_request' &&
+    typeof m.request_id === 'string' &&
+    m.request != null &&
+    typeof m.request === 'object' &&
+    (m.request as Record<string, unknown>).subtype === 'can_use_tool'
   );
+}
+
+/**
+ * Returns true when filePath is contained within workDir.
+ * Handles Windows-style absolute paths (e.g. "D:\\...") on Linux/macOS by
+ * treating them as outside the workDir.
+ */
+function isPathWithinWorkDir(filePath: string, workDir: string): boolean {
+  // Windows absolute paths always lie outside a POSIX workDir.
+  if (/^[A-Za-z]:[/\\]/.test(filePath)) {
+    return false;
+  }
+  const abs = isAbsolute(filePath) ? filePath : resolve(workDir, filePath);
+  const rel = relative(workDir, abs);
+  // relative() starts with '..' when abs is outside workDir
+  return !rel.startsWith('..');
+}
+
+/**
+ * Determine whether a can_use_tool permission request should be allowed.
+ *
+ * Policy:
+ *  - Bash and non-path tools run with their CWD locked to workDir and are
+ *    allowed by default.
+ *  - File-path tools (Read, Write, Edit, Glob, Grep, …) are allowed only
+ *    when the target path is within workDir.
+ */
+function isToolOperationAllowed(
+  request: CanUseToolRequest['request'],
+  workDir: string,
+): boolean {
+  const toolName = request.tool_name ?? '';
+  const input = request.input ?? {};
+
+  // Bash runs with CWD = workDir (enforced by runWithCwdOverride in free-code).
+  // Todo tools and similar non-path tools are safe to allow.
+  if (toolName === 'Bash' || toolName === 'TodoRead' || toolName === 'TodoWrite') {
+    return true;
+  }
+
+  // blocked_path, when set, is the exact path the permission system flagged.
+  if (typeof request.blocked_path === 'string') {
+    return isPathWithinWorkDir(request.blocked_path, workDir);
+  }
+
+  // For path-based tools inspect common input path keys.
+  const pathValue = input.file_path ?? input.path ?? input.directory ?? input.dir;
+  if (typeof pathValue === 'string') {
+    return isPathWithinWorkDir(pathValue, workDir);
+  }
+
+  // No path info — allow by default (the session CWD is already restricted).
+  return true;
 }
 
 function normalizeConversationHistory(
@@ -359,10 +433,33 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 
   sseWrite(res, 'session', { conversationId: convId });
 
+  // ─── Issue 1: Turn serialization ───────────────────────────────────────────
+  // Replace the conversation's pendingTurn with a new promise so that the
+  // *next* request on the same conversationId waits for THIS turn to finish.
+  // Then await the *previous* turn before opening the WebSocket so we never
+  // have two concurrent WS connections reading from the same session.
+  const previousTurn = convState.pendingTurn;
+  let resolveTurn!: () => void;
+  convState.pendingTurn = new Promise<void>(r => {
+    resolveTurn = r;
+  });
+
+  // Wait for the previous turn to complete, with a safety timeout so a
+  // hung previous turn never blocks this request forever.
+  await Promise.race([previousTurn, new Promise<void>(r => setTimeout(r, 30_000))]);
+
+  // If the client disconnected while we were waiting, bail out cleanly.
+  const socket = (res as unknown as { socket?: { destroyed?: boolean } }).socket;
+  if (socket?.destroyed) {
+    resolveTurn();
+    return;
+  }
+
   function connectAndStream(
     state: ConversationState,
     isRetry: boolean,
     shouldReplayHistory: boolean,
+    onDone: () => void,
   ): void {
     const ws = new WebSocket(buildWsUrl(state.freeCodeWsUrl));
     let finished = false;
@@ -381,6 +478,8 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
         ws.close();
       }
       res.end();
+      // Signal that this turn is complete so queued requests can proceed.
+      onDone();
     };
 
     res.on('close', finish);
@@ -413,26 +512,31 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
 
         try {
           const parsedMsg = JSON.parse(trimmed) as Record<string, unknown>;
-          if (
-            isControlRequestMessage(parsedMsg) &&
-            parsedMsg.request.subtype === 'can_use_tool'
-          ) {
-            const denyMessage = buildDirectChatPermissionDeniedMessage(state.workDir);
+
+          // ─── Issue 3: Directory-based permission control ──────────────────
+          // Allow tool operations within the project workDir; deny everything
+          // outside.  This replaces the blanket deny-all handler and gives the
+          // AI full capabilities inside the working directory.
+          if (isCanUseToolMessage(parsedMsg)) {
+            const allowed = isToolOperationAllowed(parsedMsg.request, state.workDir);
             ws.send(
               JSON.stringify({
                 type: 'control_response',
                 response: {
                   subtype: 'success',
                   request_id: parsedMsg.request_id,
-                  response: {
-                    behavior: 'deny',
-                    message: denyMessage,
-                  },
+                  response: allowed
+                    ? { behavior: 'allow' }
+                    : {
+                        behavior: 'deny',
+                        message: buildDirectChatPermissionDeniedMessage(state.workDir),
+                      },
                 },
               }),
             );
             continue;
           }
+
           const msg = parsedMsg;
           if (msg.type === 'result' && !usageRecorded) {
             usageRecorded = true;
@@ -463,11 +567,11 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
         createFreeCodeSession(state.workDir, state.projectId)
           .then(fresh => {
             conversations.set(convId, fresh);
-            connectAndStream(fresh, true, true);
+            connectAndStream(fresh, true, true, onDone);
           })
           .catch((sessionErr: unknown) => {
-            const message = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
-            sseWrite(res, 'error', { content: `会话恢复失败: ${message}` });
+            const errMessage = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
+            sseWrite(res, 'error', { content: `会话恢复失败: ${errMessage}` });
             sseWrite(res, 'done', {});
             finish();
           });
@@ -487,11 +591,11 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
         createFreeCodeSession(state.workDir, state.projectId)
           .then(fresh => {
             conversations.set(convId, fresh);
-            connectAndStream(fresh, true, true);
+            connectAndStream(fresh, true, true, onDone);
           })
           .catch((sessionErr: unknown) => {
-            const message = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
-            sseWrite(res, 'error', { content: `会话恢复失败: ${message}` });
+            const errMessage = sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
+            sseWrite(res, 'error', { content: `会话恢复失败: ${errMessage}` });
             sseWrite(res, 'done', {});
             finish();
           });
@@ -503,7 +607,7 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     });
   }
 
-  connectAndStream(convState, false, needsFreshSession || shouldRefreshSession);
+  connectAndStream(convState, false, needsFreshSession || shouldRefreshSession, resolveTurn);
 });
 
 export function handleFreeCodeMsg(

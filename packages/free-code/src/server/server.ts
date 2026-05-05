@@ -46,12 +46,14 @@ async function parseCreateBody(req: Request): Promise<{
   cwd?: string
   dangerously_skip_permissions?: boolean
   permission_mode?: 'acceptEdits'
+  system_prompt?: string
 }> {
   try {
     return (await req.json()) as {
       cwd?: string
       dangerously_skip_permissions?: boolean
       permission_mode?: 'acceptEdits'
+      system_prompt?: string
     }
   } catch {
     return {}
@@ -119,6 +121,7 @@ export function startServer(
             cwd,
             dangerouslySkipPermissions: body.dangerously_skip_permissions,
             permissionMode: body.permission_mode,
+            systemPrompt: body.system_prompt,
           })
 
           return new Response(

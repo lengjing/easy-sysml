@@ -4062,7 +4062,9 @@ async function run(): Promise<CommanderCommand> {
           agents: shared.agentDefinitions.activeAgents,
           getAppState: () => store.getState(),
           setAppState: store.setState,
-          baseOptions: {}
+          baseOptions: {
+            systemPrompt: sessionOpts.systemPrompt,
+          }
         };
       }
     });

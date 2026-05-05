@@ -11,7 +11,7 @@ import {
   setCwdState,
 } from '../bootstrap/state.js'
 import { generateTaskId } from '../Task.js'
-import { pwd } from './cwd.js'
+import { pwd, updateSessionCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, isENOENT } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -462,6 +462,10 @@ export function setCwd(path: string, relativeTo?: string): void {
   }
 
   setCwdState(physicalPath)
+  // In server mode (runWithCwdOverride context), also update the per-session
+  // mutable CWD store so that `cd` changes are visible within the session
+  // without affecting other concurrent sessions.
+  updateSessionCwd(physicalPath)
   if (process.env.NODE_ENV !== 'test') {
     try {
       logEvent('tengu_shell_set_cwd', {
