@@ -3,6 +3,5 @@ dist/
 out/
 *.tsbuildinfo
 .DS_Store
-.envnohup.out
-package-lock.json
-packages/free-code/package-lock.json
+.env
+nohup.out
