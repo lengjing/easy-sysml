@@ -402,6 +402,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       case '/clear':
         chatSessions.setMessages([]);
         chatSessions.setConversationId(null);
+        chatSessions.saveSession([]);
         setInput('');
         break;
     }
@@ -477,6 +478,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     let durationMs: number | undefined;
     // Track messages accumulated for this turn (errors may be added during streaming)
     let turnMessages = [...turnStartMessages];
+    // Set to true when the user explicitly aborts so we skip persistence
+    let turnAborted = false;
 
     try {
       const requestMessages = turnStartMessages
@@ -663,7 +666,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        turnAborted = true;
+        return;
+      }
       const message = err instanceof Error ? err.message : '生成失败';
       const errorMsg: ChatMessage = {
         id: makeId(), role: 'error', content: message,
@@ -672,6 +678,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       turnMessages = [...turnMessages, errorMsg];
       chatSessionsRef.current.setMessages(turnMessages);
     } finally {
+      // Persist exactly once per turn, after the turn is fully resolved.
+      // Skipped when the user aborts (turnAborted) since no meaningful response arrived.
+      if (!turnAborted) {
+        chatSessionsRef.current.saveSession(turnMessages);
+      }
       setLoading(false);
       setStreamingContent('');
       setStreamingThinking([]);
