@@ -3,9 +3,11 @@
  *
  * Stateful multi-turn chat endpoint. Compatible with easy-sysml's AIChatPanel.
  * Manages free-code agent sessions internally, keyed by conversationId.
+ * The free-code server maintains its own conversation history — we send only
+ * the current user message each turn (REPL mode).
  *
  * Request body:
- *   { messages, currentCode?, conversationId?, autoApply?, projectId? }
+ *   { message, conversationId?, autoApply?, projectId? }
  *
  * SSE event stream:
  *   session    — { conversationId }  (first event)
@@ -34,7 +36,6 @@ interface ConversationState {
   freeCodeSessionId: string;
   freeCodeWsUrl: string;
   lastActiveAt: number;
-  needsBootstrap: boolean;
   projectId: string | null;
   workDir: string;
 }
@@ -47,7 +48,6 @@ interface StreamState {
 const conversations = new Map<string, ConversationState>();
 const DIRECT_CHAT_SESSION_MAX_AGE_MS = 9 * 60 * 1000;
 const CONVERSATION_TTL = 30 * 60 * 1000;
-const MAX_HISTORY_MESSAGES = 12;
 const MAX_TOOL_RESULT = 800;
 
 setInterval(
@@ -137,39 +137,6 @@ function sseWrite(res: Response, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function buildUserTurnContent(
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  currentCode: string | undefined,
-  includeBootstrap: boolean,
-): string {
-  const lastUserMessage = [...messages].reverse().find(message => message.role === 'user');
-  const content = lastUserMessage?.content ?? '';
-  const parts: string[] = [];
-
-  if (includeBootstrap) {
-    parts.push(SYSML_SYSTEM_PROMPT);
-
-    const previousMessages = messages.slice(0, -1).slice(-MAX_HISTORY_MESSAGES);
-    if (previousMessages.length > 0) {
-      const formattedHistory = previousMessages
-        .map(message => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content.trim()}`)
-        .join('\n\n');
-      parts.push(`Conversation so far:\n${formattedHistory}`);
-    }
-  }
-
-  if (currentCode?.trim()) {
-    parts.push(`Current editor code:\n\`\`\`sysml\n${currentCode.trim()}\n\`\`\``);
-  }
-
-  if (parts.length === 0) {
-    return content;
-  }
-
-  parts.push(`User request:\n${content}`);
-  return parts.join('\n\n');
-}
-
 async function createFreeCodeSession(
   workDir: string,
   projectId: string | null,
@@ -184,6 +151,7 @@ async function createFreeCodeSession(
         body: JSON.stringify({
           dangerously_skip_permissions: true,
           cwd: workDir,
+          system_prompt: SYSML_SYSTEM_PROMPT,
         }),
       });
 
@@ -201,7 +169,6 @@ async function createFreeCodeSession(
         freeCodeSessionId: session_id,
         freeCodeWsUrl: ws_url,
         lastActiveAt: Date.now(),
-        needsBootstrap: true,
         projectId,
         workDir,
       };
@@ -215,14 +182,12 @@ async function createFreeCodeSession(
 
 directChatRouter.post('/', async (req: Request, res: Response) => {
   const {
-    messages,
-    currentCode,
+    message,
     conversationId: clientConvId,
     autoApply = true,
     projectId,
   } = req.body as {
-    messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
-    currentCode?: string;
+    message?: string;
     conversationId?: string;
     autoApply?: boolean;
     projectId?: string;
@@ -245,14 +210,9 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
   }
   const authenticatedApiKey = apiKeyAuth.record;
 
-  if (!Array.isArray(messages) || messages.length === 0) {
-    res.status(400).json({ error: 'messages is required' });
-    return;
-  }
-
-  const lastUserMsg = [...messages].reverse().find(message => message.role === 'user');
-  if (!lastUserMsg) {
-    res.status(400).json({ error: 'No user message found' });
+  const userMessage = typeof message === 'string' ? message.trim() : '';
+  if (!userMessage) {
+    res.status(400).json({ error: 'message is required' });
     return;
   }
 
@@ -267,7 +227,6 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const requestMessages = messages;
   const responseSock = (res as unknown as { socket?: { setNoDelay?: (enabled: boolean) => void } }).socket;
   responseSock?.setNoDelay?.(true);
 
@@ -329,16 +288,11 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
     res.on('close', finish);
 
     ws.on('open', () => {
-      const userContent = buildUserTurnContent(requestMessages, currentCode, state.needsBootstrap);
-      state.needsBootstrap = false;
       state.lastActiveAt = Date.now();
       ws.send(
         JSON.stringify({
           type: 'user',
-          message: {
-            role: 'user',
-            content: userContent,
-          },
+          message: userMessage,
           parent_tool_use_id: null,
           session_id: state.freeCodeSessionId,
         }),

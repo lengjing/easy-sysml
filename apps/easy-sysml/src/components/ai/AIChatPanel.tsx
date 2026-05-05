@@ -478,10 +478,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     let turnMessages = [...turnStartMessages];
 
     try {
-      const history = turnStartMessages
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -489,8 +485,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           ...(apiKey.trim() ? { 'X-Easy-SysML-API-Key': apiKey.trim() } : {}),
         },
         body: JSON.stringify({
-          messages: history,
-          currentCode: currentCode?.trim() || undefined,
+          message: userText,
           conversationId: chatSessionsRef.current.conversationId || undefined,
           autoApply: true,
           projectId,
@@ -710,7 +705,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
             <Sparkles size={12} className="text-white" />
           </div>
-          <span className="text-[13px] font-semibold text-[var(--text-main)]">Agent</span>
+          <span className="text-[13px] font-semibold text-[var(--text-main)]">Copilot</span>
           {backendStatus?.ok && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
               free-code
@@ -1208,46 +1203,39 @@ const MessageBubble: React.FC<{
   const hasActions = msg.thinkingSteps.length > 0 || msg.toolCalls.length > 0;
 
   return (
-    <div className="flex gap-2.5">
-      {/* Avatar */}
-      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-        <Sparkles size={11} className="text-white" />
+    <div className="flex flex-col gap-2">
+      {/* Header row */}
+      <div className="flex items-center gap-2">
+        <span className="text-[12px] font-semibold text-[var(--text-main)]">Copilot</span>
+        {msg.durationMs !== undefined && (
+          <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+            <Clock size={9} />
+            {(msg.durationMs / 1000).toFixed(1)}s
+          </span>
+        )}
+        {msg.codesSynced > 0 && (
+          <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+            <CheckCircle size={9} />
+            {msg.codesSynced} 文件已同步
+          </span>
+        )}
       </div>
 
-      <div className="flex-1 min-w-0 space-y-2">
-        {/* Header row */}
-        <div className="flex items-center gap-2">
-          <span className="text-[12px] font-semibold text-[var(--text-main)]">Agent</span>
-          {msg.durationMs !== undefined && (
-            <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-              <Clock size={9} />
-              {(msg.durationMs / 1000).toFixed(1)}s
-            </span>
-          )}
-          {msg.codesSynced > 0 && (
-            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
-              <CheckCircle size={9} />
-              {msg.codesSynced} 文件已同步
-            </span>
-          )}
+      {/* Action history block */}
+      {hasActions && (
+        <ActionHistoryBlock
+          thinkingSteps={msg.thinkingSteps}
+          toolCalls={msg.toolCalls}
+          thinkingDurationMs={msg.thinkingDurationMs}
+        />
+      )}
+
+      {/* Response text */}
+      {msg.content.trim() && (
+        <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
+          <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
         </div>
-
-        {/* Action history block */}
-        {hasActions && (
-          <ActionHistoryBlock
-            thinkingSteps={msg.thinkingSteps}
-            toolCalls={msg.toolCalls}
-            thinkingDurationMs={msg.thinkingDurationMs}
-          />
-        )}
-
-        {/* Response text */}
-        {msg.content.trim() && (
-          <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-            <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 });

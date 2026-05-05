@@ -424,7 +424,7 @@ describe('directChatRouter', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messages: [{ role: 'user', content: 'hello' }],
+        message: 'hello',
       }),
     });
 
@@ -442,7 +442,7 @@ describe('directChatRouter', () => {
         'X-Easy-SysML-API-Key': plaintextKey,
       },
       body: JSON.stringify({
-        messages: [{ role: 'user', content: 'hello' }],
+        message: 'hello',
       }),
     });
 
@@ -512,7 +512,7 @@ describe('directChatRouter', () => {
       },
       body: JSON.stringify({
         conversationId: 'conv-1',
-        messages: [{ role: 'user', content: 'first question' }],
+        message: 'first question',
         projectId: server!.projectId,
       }),
     });
@@ -526,7 +526,7 @@ describe('directChatRouter', () => {
       },
       body: JSON.stringify({
         conversationId: 'conv-1',
-        messages: [{ role: 'user', content: 'second question' }],
+        message: 'second question',
         projectId: server!.projectId,
       }),
     });
