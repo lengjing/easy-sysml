@@ -47,20 +47,7 @@ interface StreamState {
 
 const conversations = new Map<string, ConversationState>();
 const DIRECT_CHAT_SESSION_MAX_AGE_MS = 9 * 60 * 1000;
-const CONVERSATION_TTL = 30 * 60 * 1000;
 const MAX_TOOL_RESULT = 800;
-
-setInterval(
-  () => {
-    const now = Date.now();
-    for (const [id, state] of conversations.entries()) {
-      if (now - state.lastActiveAt > CONVERSATION_TTL) {
-        conversations.delete(id);
-      }
-    }
-  },
-  5 * 60 * 1000,
-).unref();
 
 function getFreeCodeUrl(): string {
   return process.env.FREE_CODE_SERVER_URL || 'http://localhost:3002';
