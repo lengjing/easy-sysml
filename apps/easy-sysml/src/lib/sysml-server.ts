@@ -205,7 +205,7 @@ export async function getChatSession(
 export async function updateChatSession(
   projectId: string,
   sessionId: string,
-  input: { title?: string; conversation_id?: string | null },
+  input: { title?: string; conversation_id?: string | null; messages?: unknown[] },
 ): Promise<ServerChatSession> {
   const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}`), {
     method: 'PUT',

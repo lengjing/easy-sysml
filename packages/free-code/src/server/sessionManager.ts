@@ -18,6 +18,7 @@ export type SessionBackend = {
     dangerouslySkipPermissions?: boolean
     permissionMode?: 'acceptEdits'
     resumeSessionId?: string
+    systemPrompt?: string
   }): Promise<{ child: ServerSessionProcess; workDir: string }>
 }
 
@@ -109,6 +110,7 @@ export class SessionManager {
     cwd: string
     dangerouslySkipPermissions?: boolean
     permissionMode?: 'acceptEdits'
+    systemPrompt?: string
   }): Promise<{ id: string; workDir: string }> {
     const maxSessions = this.options.maxSessions ?? 0
     if (maxSessions > 0 && this.sessions.size >= maxSessions) {

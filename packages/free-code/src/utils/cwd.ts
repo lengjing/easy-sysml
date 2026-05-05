@@ -1,7 +1,10 @@
 import { AsyncLocalStorage } from 'async_hooks'
 import { getCwdState, getOriginalCwd } from '../bootstrap/state.js'
 
-const cwdOverrideStorage = new AsyncLocalStorage<string>()
+// Store a mutable box so that setCwd() (which handles `cd` within a session)
+// can update the per-session directory without touching the global STATE.cwd
+// used by other concurrent sessions.
+const cwdOverrideStorage = new AsyncLocalStorage<{ current: string }>()
 
 /**
  * Run a function with an overridden working directory for the current async context.
@@ -10,14 +13,28 @@ const cwdOverrideStorage = new AsyncLocalStorage<string>()
  * agents to each see their own working directory without affecting each other.
  */
 export function runWithCwdOverride<T>(cwd: string, fn: () => T): T {
-  return cwdOverrideStorage.run(cwd, fn)
+  return cwdOverrideStorage.run({ current: cwd }, fn)
+}
+
+/**
+ * Update the working directory for the currently active session context.
+ * Returns true if there was an active override context (server mode),
+ * false if running in CLI mode (no per-session context).
+ */
+export function updateSessionCwd(cwd: string): boolean {
+  const store = cwdOverrideStorage.getStore()
+  if (store) {
+    store.current = cwd
+    return true
+  }
+  return false
 }
 
 /**
  * Get the current working directory
  */
 export function pwd(): string {
-  return cwdOverrideStorage.getStore() ?? getCwdState()
+  return cwdOverrideStorage.getStore()?.current ?? getCwdState()
 }
 
 /**

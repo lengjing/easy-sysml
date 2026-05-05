@@ -818,4 +818,236 @@ describe('directChatRouter', () => {
 
     expect(createdSessions).toHaveLength(0);
   });
+
+  it('includes the project workDir in the system prompt sent to the free-code server', async () => {
+    const createdSessionBodies: Array<Record<string, unknown>> = [];
+
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input);
+      if (url.startsWith('http://fake-free-code/')) {
+        createdSessionBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+        return new Response(JSON.stringify({
+          session_id: 'session-system-prompt',
+          ws_url: 'ws://fake-free-code/sessions/session-system-prompt/ws',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    globalWithPlans.__directChatWsPlans__!.push(ws => {
+      ws.readyState = 1;
+      ws.emit('open');
+      queueMicrotask(() => {
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({ type: 'result', result: 'ok' }) + '\n'),
+        );
+      });
+    });
+
+    const response = await fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
+      body: JSON.stringify({
+        message: 'what is cwd?',
+        projectId: server!.projectId,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(createdSessionBodies).toHaveLength(1);
+    expect(typeof createdSessionBodies[0].system_prompt).toBe('string');
+    expect(createdSessionBodies[0].system_prompt).toContain(server!.workDir);
+  });
+
+  it('allows can_use_tool requests for paths inside the project workDir', async () => {
+    const sentMessages: Array<Record<string, unknown>> = [];
+
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input);
+      if (url.startsWith('http://fake-free-code/')) {
+        return new Response(JSON.stringify({
+          session_id: 'session-allow-path',
+          ws_url: 'ws://fake-free-code/sessions/session-allow-path/ws',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    // Build a path that is definitely inside the project workDir
+    const fileInWorkDir = join(server!.workDir, 'model.sysml');
+
+    globalWithPlans.__directChatWsPlans__!.push(ws => {
+      ws.send = ((chunk: string) => {
+        sentMessages.push(JSON.parse(chunk) as Record<string, unknown>);
+      }) as typeof ws.send;
+      ws.readyState = 1;
+      ws.emit('open');
+      queueMicrotask(() => {
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({
+            type: 'control_request',
+            request_id: 'allow-1',
+            request: {
+              subtype: 'can_use_tool',
+              tool_name: 'Read',
+              input: { file_path: fileInWorkDir },
+              tool_use_id: 'tool-allow-1',
+            },
+          }) + '\n'),
+        );
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({ type: 'result', result: 'ok' }) + '\n'),
+        );
+      });
+    });
+
+    const response = await fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
+      body: JSON.stringify({
+        message: 'read model file',
+        projectId: server!.projectId,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await response.text();
+
+    expect(sentMessages).toEqual(
+      expect.arrayContaining([
+        {
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: 'allow-1',
+            response: { behavior: 'allow' },
+          },
+        },
+      ]),
+    );
+  });
+
+  it('serializes concurrent turns on the same conversationId', async () => {
+    // Track which WS connections have opened
+    const openedSessions: string[] = [];
+    const firstTurnUnblock: (() => void)[] = [];
+
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input);
+      if (url.startsWith('http://fake-free-code/')) {
+        return new Response(JSON.stringify({
+          session_id: 'session-serial',
+          ws_url: 'ws://fake-free-code/sessions/session-serial/ws',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    // First WS: opens immediately, but the result is delivered only after we
+    // signal it (simulating a long-running first turn).
+    globalWithPlans.__directChatWsPlans__!.push(ws => {
+      openedSessions.push('first');
+      ws.readyState = 1;
+      ws.emit('open');
+      // Deliver the result asynchronously when unblocked
+      firstTurnUnblock.push(() => {
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({ type: 'result', result: 'turn 1 result' }) + '\n'),
+        );
+      });
+    });
+
+    // Second WS: opens after the first turn completes
+    globalWithPlans.__directChatWsPlans__!.push(ws => {
+      openedSessions.push('second');
+      ws.readyState = 1;
+      ws.emit('open');
+      queueMicrotask(() => {
+        ws.emit(
+          'message',
+          Buffer.from(JSON.stringify({ type: 'result', result: 'turn 2 result' }) + '\n'),
+        );
+      });
+    });
+
+    // Start turn 1 — don't await yet
+    const firstFetch = fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
+      body: JSON.stringify({
+        conversationId: 'conv-serial',
+        message: 'first question',
+        projectId: server!.projectId,
+      }),
+    });
+
+    // Give the first turn time to open its WS and reach the waiting state
+    await new Promise<void>(r => setTimeout(r, 20));
+
+    // Start turn 2 (concurrently with turn 1)
+    const secondFetch = fetch(`${server!.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Easy-SysML-API-Key': server!.apiKey,
+      },
+      body: JSON.stringify({
+        conversationId: 'conv-serial',
+        message: 'second question',
+        projectId: server!.projectId,
+      }),
+    });
+
+    // Give turn 2 a moment to register and start waiting
+    await new Promise<void>(r => setTimeout(r, 20));
+
+    // Only the first WS should have opened so far (second is waiting)
+    expect(openedSessions).toEqual(['first']);
+
+    // Unblock turn 1
+    firstTurnUnblock[0]?.();
+
+    // Now await both turns to complete
+    const [firstResponse, secondResponse] = await Promise.all([firstFetch, secondFetch]);
+    const firstEvents = readSseEvents(await firstResponse.text());
+    const secondEvents = readSseEvents(await secondResponse.text());
+
+    // After turn 1 completed, turn 2 opened its WS
+    expect(openedSessions).toEqual(['first', 'second']);
+
+    expect(firstEvents).toEqual(expect.arrayContaining([
+      { event: 'session', data: { conversationId: 'conv-serial' } },
+      expect.objectContaining({ event: 'result', data: expect.objectContaining({ result: 'turn 1 result' }) }),
+      { event: 'done', data: {} },
+    ]));
+
+    expect(secondEvents).toEqual(expect.arrayContaining([
+      { event: 'session', data: { conversationId: 'conv-serial' } },
+      expect.objectContaining({ event: 'result', data: expect.objectContaining({ result: 'turn 2 result' }) }),
+      { event: 'done', data: {} },
+    ]));
+  });
 });

@@ -165,9 +165,10 @@ chatSessionsRouter.put('/:sessionId', (req: Request, res: Response) => {
     return;
   }
 
-  const { title, conversation_id } = req.body as {
+  const { title, conversation_id, messages } = req.body as {
     title?: string;
     conversation_id?: string | null;
+    messages?: unknown[];
   };
 
   const now = Date.now();
@@ -181,6 +182,10 @@ chatSessionsRouter.put('/:sessionId', (req: Request, res: Response) => {
   if (conversation_id !== undefined) {
     sets.push('conversation_id = ?');
     params.push(conversation_id ?? null);
+  }
+  if (Array.isArray(messages)) {
+    sets.push('messages_json = ?');
+    params.push(JSON.stringify(messages));
   }
 
   params.push(req.params.sessionId, req.params.projectId);

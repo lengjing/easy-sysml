@@ -116,6 +116,7 @@ export type DangerousBackendDeps = {
     dangerouslySkipPermissions?: boolean
     permissionMode?: 'acceptEdits'
     resumeSessionId?: string
+    systemPrompt?: string
   }) => Promise<{
     commands: Command[]
     tools: Tools
@@ -149,6 +150,7 @@ class InProcessSessionChild
       cwd: string
       dangerouslySkipPermissions?: boolean
       resumeSessionId?: string
+      systemPrompt?: string
     },
   ) {
     super()
@@ -285,6 +287,7 @@ export class DangerousBackend {
     dangerouslySkipPermissions?: boolean
     permissionMode?: 'acceptEdits'
     resumeSessionId?: string
+    systemPrompt?: string
   }): Promise<SpawnedSession> {
     const child = new InProcessSessionChild(this.deps, opts)
     child.start()
