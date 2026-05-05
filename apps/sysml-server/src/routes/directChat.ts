@@ -212,6 +212,9 @@ function isCanUseToolMessage(msg: unknown): msg is CanUseToolRequest {
   );
 }
 
+/** Matches Windows-style absolute paths like "C:\..." or "D:/..." */
+const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[/\\]/;
+
 /**
  * Returns true when filePath is contained within workDir.
  * Handles Windows-style absolute paths (e.g. "D:\\...") on Linux/macOS by
@@ -219,7 +222,7 @@ function isCanUseToolMessage(msg: unknown): msg is CanUseToolRequest {
  */
 function isPathWithinWorkDir(filePath: string, workDir: string): boolean {
   // Windows absolute paths always lie outside a POSIX workDir.
-  if (/^[A-Za-z]:[/\\]/.test(filePath)) {
+  if (WINDOWS_ABSOLUTE_PATH_RE.test(filePath)) {
     return false;
   }
   const abs = isAbsolute(filePath) ? filePath : resolve(workDir, filePath);
@@ -439,7 +442,8 @@ directChatRouter.post('/', async (req: Request, res: Response) => {
   // Then await the *previous* turn before opening the WebSocket so we never
   // have two concurrent WS connections reading from the same session.
   const previousTurn = convState.pendingTurn;
-  let resolveTurn!: () => void;
+  // Promise executor runs synchronously so resolveTurn is always set before it's used.
+  let resolveTurn: () => void = () => undefined;
   convState.pendingTurn = new Promise<void>(r => {
     resolveTurn = r;
   });
