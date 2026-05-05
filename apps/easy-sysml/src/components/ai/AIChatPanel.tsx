@@ -478,10 +478,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     let turnMessages = [...turnStartMessages];
 
     try {
-      const history = turnStartMessages
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -489,8 +485,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           ...(apiKey.trim() ? { 'X-Easy-SysML-API-Key': apiKey.trim() } : {}),
         },
         body: JSON.stringify({
-          messages: history,
-          currentCode: currentCode?.trim() || undefined,
+          message: userText,
           conversationId: chatSessionsRef.current.conversationId || undefined,
           autoApply: true,
           projectId,
@@ -710,7 +705,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
             <Sparkles size={12} className="text-white" />
           </div>
-          <span className="text-[13px] font-semibold text-[var(--text-main)]">Agent</span>
+          <span className="text-[13px] font-semibold text-[var(--text-main)]">Copilot</span>
           {backendStatus?.ok && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
               free-code
@@ -883,9 +878,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-purple-500/20 to-blue-500/20 mb-4">
                 <Sparkles size={28} className="text-purple-500" />
               </div>
-              <h3 className="text-sm font-semibold text-[var(--text-main)] mb-1.5">SysML v2 Agent</h3>
+              <h3 className="text-sm font-semibold text-[var(--text-main)] mb-1.5">SysML v2 Copilot</h3>
               <p className="text-[12px] text-[var(--text-muted)] max-w-[260px] mx-auto leading-relaxed">
-                由 free-code Agent 驱动，可直接读写文件、执行命令，并将 SysML 代码同步到编辑器
+                由 free-code Copilot 驱动，可直接读写文件、执行命令，并将 SysML 代码同步到编辑器
               </p>
             </div>
             <div className="space-y-2">
@@ -958,7 +953,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={loading ? '生成中…' : !aiAvailable ? '正在连接后端…' : !hasConfiguredApiKey ? '请先配置 API key…' : '向 Agent 发送消息…'}
+            placeholder={loading ? '生成中…' : !aiAvailable ? '正在连接后端…' : !hasConfiguredApiKey ? '请先配置 API key…' : '向 Copilot 发送消息…'}
             disabled={loading || !chatEnabled}
             rows={1}
             className="w-full bg-transparent px-4 pt-3 pb-1 text-[13px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] resize-none focus:outline-none disabled:cursor-not-allowed min-h-[44px] max-h-[150px]"
@@ -1051,12 +1046,9 @@ const LiveStreamingView: React.FC<{
 
   return (
     <div className="space-y-2">
-      {/* Agent avatar + label */}
+      {/* Copilot label + spinner */}
       <div className="flex items-center gap-2">
-        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
-          <Sparkles size={11} className="text-white" />
-        </div>
-        <span className="text-[12px] font-semibold text-[var(--text-main)]">Agent</span>
+        <span className="text-[12px] font-semibold text-[var(--text-main)]">Copilot</span>
         <Loader2 size={11} className="text-purple-500 animate-spin ml-1" />
       </div>
 
@@ -1067,10 +1059,10 @@ const LiveStreamingView: React.FC<{
           {thinking.length > 0 && (
             <div className="flex items-center gap-2.5 px-3 py-2 border-b border-[var(--border-color)] last:border-b-0">
               <Brain size={12} className="text-purple-500 flex-shrink-0 animate-pulse" />
-              <span className="text-[12px] text-[var(--text-muted)]">
+              <span className="text-[12px] text-[var(--text-muted)] flex-1 min-w-0 truncate">
                 正在思考…
               </span>
-              <span className="ml-auto text-[10px] text-purple-400 font-medium">
+              <span className="flex-shrink-0 text-[10px] text-purple-400 font-medium">
                 {formatDurationLabel(liveThinkingDurationMs)}
               </span>
             </div>
@@ -1139,7 +1131,7 @@ const LiveActionRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
         <ToolIcon name={tc.name} size={11} />
       </span>
       <span className={cn(
-        'text-[12px]',
+        'text-[12px] flex-1 min-w-0 truncate',
         isRunning ? 'text-[var(--text-main)]' : isError ? 'text-red-500' : 'text-[var(--text-main)]',
       )}>
         {desc}
@@ -1208,46 +1200,39 @@ const MessageBubble: React.FC<{
   const hasActions = msg.thinkingSteps.length > 0 || msg.toolCalls.length > 0;
 
   return (
-    <div className="flex gap-2.5">
-      {/* Avatar */}
-      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-        <Sparkles size={11} className="text-white" />
+    <div className="flex flex-col gap-2">
+      {/* Header row */}
+      <div className="flex items-center gap-2">
+        <span className="text-[12px] font-semibold text-[var(--text-main)]">Copilot</span>
+        {msg.durationMs !== undefined && (
+          <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+            <Clock size={9} />
+            {(msg.durationMs / 1000).toFixed(1)}s
+          </span>
+        )}
+        {msg.codesSynced > 0 && (
+          <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+            <CheckCircle size={9} />
+            {msg.codesSynced} 文件已同步
+          </span>
+        )}
       </div>
 
-      <div className="flex-1 min-w-0 space-y-2">
-        {/* Header row */}
-        <div className="flex items-center gap-2">
-          <span className="text-[12px] font-semibold text-[var(--text-main)]">Agent</span>
-          {msg.durationMs !== undefined && (
-            <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-              <Clock size={9} />
-              {(msg.durationMs / 1000).toFixed(1)}s
-            </span>
-          )}
-          {msg.codesSynced > 0 && (
-            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
-              <CheckCircle size={9} />
-              {msg.codesSynced} 文件已同步
-            </span>
-          )}
+      {/* Action history block */}
+      {hasActions && (
+        <ActionHistoryBlock
+          thinkingSteps={msg.thinkingSteps}
+          toolCalls={msg.toolCalls}
+          thinkingDurationMs={msg.thinkingDurationMs}
+        />
+      )}
+
+      {/* Response text */}
+      {msg.content.trim() && (
+        <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
+          <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
         </div>
-
-        {/* Action history block */}
-        {hasActions && (
-          <ActionHistoryBlock
-            thinkingSteps={msg.thinkingSteps}
-            toolCalls={msg.toolCalls}
-            thinkingDurationMs={msg.thinkingDurationMs}
-          />
-        )}
-
-        {/* Response text */}
-        {msg.content.trim() && (
-          <div className="text-[13px] text-[var(--text-main)] leading-relaxed">
-            <Markdown components={mdComponents} remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 });
@@ -1274,7 +1259,7 @@ const ActionHistoryBlock: React.FC<{
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--border-color)]/40 transition-colors text-left"
       >
         <Play size={10} className="text-[var(--text-muted)] flex-shrink-0" />
-        <span className="text-[11px] font-semibold text-[var(--text-muted)] flex-1">
+        <span className="text-[11px] font-semibold text-[var(--text-muted)] flex-1 min-w-0 truncate">
           Action history · {totalActions} 项
         </span>
         {open ? <ChevronDown size={12} className="text-[var(--text-muted)]" /> : <ChevronRight size={12} className="text-[var(--text-muted)]" />}
@@ -1362,7 +1347,7 @@ const CompletedActionRow: React.FC<{ tc: ToolCall }> = ({ tc }) => {
           <ToolIcon name={tc.name} size={12} />
         </span>
         <span className={cn(
-          'text-[12px] flex-1 min-w-0',
+          'text-[12px] flex-1 min-w-0 truncate',
           isError ? 'text-red-600 dark:text-red-400' : 'text-[var(--text-main)]',
         )}>
           {desc}
