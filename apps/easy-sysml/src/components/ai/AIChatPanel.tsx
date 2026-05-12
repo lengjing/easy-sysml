@@ -1,7 +1,7 @@
 /**
  * AI Chat Panel — Google AI Studio-style Agent Interface
  *
- * Communicates with sysml-server via SSE streaming, which proxies to free-code agent.
+ * Communicates with sysml-server via SSE streaming, which proxies to Claude server.
  * - Streams markdown content token-by-token (rendered via react-markdown)
  * - Auto-applies SysML code to editor when the agent writes a .sysml file
  * - Shows action history inline: "Thought for X.X seconds", "Read file", "Edited file", etc.
@@ -45,8 +45,9 @@ interface BackendStatus {
   version?: string;
   configured?: boolean;
   providerLabel?: string;
-  free_code_server_url?: string;
   ai_api_key_required?: boolean;
+  conversation_delete_supported?: boolean;
+  chat_session_delete_supported?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -67,10 +68,10 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 const QUICK_PROMPTS = [
-  { label: '创建系统模型', prompt: '帮我创建一个无人机系统模型，包含飞行控制、电力、通信子系统，每个子系统有属性和端口，保存为 drone_system.sysml。' },
-  { label: '添加需求定义', prompt: '帮我创建需求定义，包含最大飞行高度、最大速度和续航时间的需求，保存为 requirements.sysml。' },
-  { label: '创建状态机',   prompt: '帮我创建无人机飞行状态机，包含待机、起飞、巡航、降落、紧急着陆状态，保存为 flight_states.sysml。' },
-  { label: '定义接口',     prompt: '帮我定义通信接口和数据流，包含遥控信号输入端口和遥测数据输出端口，保存为 interfaces.sysml。' },
+  { label: '创建系统模型', prompt: '帮我创建一个无人机系统模型，包含飞行控制、电力、通信子系统，每个子系统有属性和端口。' },
+  { label: '添加需求定义', prompt: '帮我创建需求定义，包含最大飞行高度、最大速度和续航时间的需求。' },
+  { label: '创建状态机',   prompt: '帮我创建无人机飞行状态机，包含待机、起飞、巡航、降落、紧急着陆状态。' },
+  { label: '定义接口',     prompt: '帮我定义通信接口和数据流，包含遥控信号输入端口和遥测数据输出端口。' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -349,8 +350,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
   const aiAvailable = backendStatus?.ok === true;
   const apiKeyRequired = backendStatus?.ai_api_key_required !== false;
+  const canDeleteSessions =
+    backendStatus?.conversation_delete_supported !== false &&
+    backendStatus?.chat_session_delete_supported !== false;
   const hasConfiguredApiKey = !apiKeyRequired || apiKey.trim().length > 0;
-  const chatEnabled = aiAvailable && hasConfiguredApiKey;
+  const chatEnabled = aiAvailable && hasConfiguredApiKey && Boolean(projectId);
 
   // Auto-scroll
   useEffect(() => {
@@ -400,9 +404,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         break;
       }
       case '/clear':
-        chatSessions.setMessages([]);
-        chatSessions.setConversationId(null);
-        chatSessions.saveSession([]);
+        chatSessions.newSession();
         setInput('');
         break;
     }
@@ -446,6 +448,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     }
 
     if (!aiAvailable) return;
+    if (!projectId) {
+      setBackendError('请先选择一个项目，再开始 AI 对话');
+      return;
+    }
 
     setInput('');
     setShowCommands(false);
@@ -482,14 +488,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     let turnAborted = false;
 
     try {
-      const requestMessages = turnStartMessages
-        .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-        .map(msg => ({
-          role: msg.role,
-          content: msg.content,
-        }));
+      const activeSession = await chatSessionsRef.current.ensureActiveSession(turnStartMessages);
+      const conversationId = activeSession?.id ?? chatSessionsRef.current.activeSessionId;
+      if (!conversationId || conversationId.startsWith('temp-')) {
+        throw new Error('无法创建对话');
+      }
 
-      const response = await fetch('/api/chat', {
+      chatSessionsRef.current.setConversationId(conversationId);
+
+      const response = await fetch(`/api/projects/${projectId}/conversations/${conversationId}/runs`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -497,10 +504,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         },
         body: JSON.stringify({
           message: userText,
-          messages: requestMessages,
-          conversationId: chatSessionsRef.current.conversationId || undefined,
           autoApply: true,
-          projectId,
         }),
         signal: controller.signal,
       });
@@ -531,6 +535,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           try {
             const data = JSON.parse(event.data);
             switch (event.event) {
+              case 'conversation':
               case 'session': {
                 if (data.conversationId) {
                   chatSessionsRef.current.setConversationId(data.conversationId);
@@ -618,7 +623,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                       : undefined;
                   const assistantMsg: ChatMessage = {
                     id: makeId(), role: 'assistant', content: contentAcc,
-                    provider: backendStatus?.providerLabel || 'free-code',
+                    provider: backendStatus?.providerLabel || 'claude',
                     thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
                     codesSynced: codeCount, durationMs, thinkingDurationMs,
                     timestamp: Date.now(),
@@ -650,7 +655,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   : undefined;
               const assistantMsg: ChatMessage = {
                 id: makeId(), role: 'assistant', content: contentAcc,
-                provider: backendStatus?.providerLabel || 'free-code',
+                provider: backendStatus?.providerLabel || 'claude',
                 thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
                 codesSynced: codeCount, durationMs, thinkingDurationMs,
                 timestamp: Date.now(),
@@ -736,7 +741,23 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
   const mdComponents = useMemo(() => markdownComponents, []);
   const mdRemarkPlugins = useMemo(() => [remarkGfm], []);
 
-  const { messages, sessions, activeSessionId, conversationId } = chatSessions;
+  const {
+    messages,
+    sessions,
+    activeSessionId,
+    conversationId,
+    ensureLoaded,
+    loading: sessionListLoading,
+    loaded: sessionListLoaded,
+  } = chatSessions;
+
+  useEffect(() => {
+    if (!showSessions) {
+      return;
+    }
+
+    void ensureLoaded();
+  }, [ensureLoaded, showSessions]);
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                          */
@@ -753,7 +774,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           <span className="text-[13px] font-semibold text-[var(--text-main)]">Copilot</span>
           {backendStatus?.ok && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
-              free-code
+              {backendStatus?.providerLabel || 'claude'}
             </span>
           )}
         </div>
@@ -867,7 +888,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             </div>
             <span className="text-[12px] font-medium text-purple-600 dark:text-purple-400">新对话</span>
           </button>
-          {sessions.length === 0 ? (
+          {sessionListLoading && !sessionListLoaded ? (
+            <p className="text-center text-[11px] text-[var(--text-muted)] py-5">正在加载历史会话...</p>
+          ) : sessions.length === 0 ? (
             <p className="text-center text-[11px] text-[var(--text-muted)] py-5">暂无历史会话</p>
           ) : (
             sessions.map(session => (
@@ -891,13 +914,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                   <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{formatRelativeTime(session.createdAt)}</p>
                 </div>
                 {/* Delete button (hover only) */}
-                <button
-                  onClick={(e) => deleteSession(session.id, e)}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-500 transition-all flex-shrink-0"
-                  title="删除会话"
-                >
-                  <Trash2 size={11} />
-                </button>
+                {canDeleteSessions && (
+                  <button
+                    onClick={(e) => deleteSession(session.id, e)}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-500 transition-all flex-shrink-0"
+                    title="删除会话"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                )}
               </div>
             ))
           )}
@@ -925,7 +950,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
               </div>
               <h3 className="text-sm font-semibold text-[var(--text-main)] mb-1.5">SysML v2 Copilot</h3>
               <p className="text-[12px] text-[var(--text-muted)] max-w-[260px] mx-auto leading-relaxed">
-                由 free-code Copilot 驱动，可直接读写文件、执行命令，并将 SysML 代码同步到编辑器
+                由 Claude Copilot 驱动，可直接读写文件、执行命令，并将 SysML 代码同步到编辑器
               </p>
             </div>
             <div className="space-y-2">
@@ -998,7 +1023,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={loading ? '生成中…' : !aiAvailable ? '正在连接后端…' : !hasConfiguredApiKey ? '请先配置 API key…' : '向 Copilot 发送消息…'}
+            placeholder={loading ? '生成中…' : !aiAvailable ? '正在连接后端…' : !projectId ? '请先选择一个项目…' : !hasConfiguredApiKey ? '请先配置 API key…' : '向 Copilot 发送消息…'}
             disabled={loading || !chatEnabled}
             rows={1}
             className="w-full bg-transparent px-4 pt-3 pb-1 text-[13px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] resize-none focus:outline-none disabled:cursor-not-allowed min-h-[44px] max-h-[150px]"

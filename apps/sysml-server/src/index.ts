@@ -1,12 +1,11 @@
-/**
- * SysML Server — Main Entry Point
+﻿/**
+ * SysML Server 鈥?Main Entry Point
  *
  * Express server providing:
  *   - Project management (CRUD)
  *   - SysML file management (filesystem-based, no DB)
- *   - Agent session management (linked to free-code server sessions)
- *   - Chat session management (stored in DB with message history)
- *   - Chat/streaming endpoint (SSE, proxies to free-code agent)
+ *   - Project-scoped conversations and transcript persistence
+ *   - Conversation runs streamed through Claude server
  *
  * API:
  *   GET    /api/projects
@@ -21,20 +20,16 @@
  *   PUT    /api/projects/:projectId/files/:nodeId
  *   DELETE /api/projects/:projectId/files/:nodeId
  *
- *   GET    /api/projects/:projectId/sessions
- *   POST   /api/projects/:projectId/sessions
- *   GET    /api/projects/:projectId/sessions/:sessionId
- *   DELETE /api/projects/:projectId/sessions/:sessionId
- *
- *   GET    /api/projects/:projectId/chat-sessions
- *   POST   /api/projects/:projectId/chat-sessions
- *   GET    /api/projects/:projectId/chat-sessions/:sessionId
- *   PUT    /api/projects/:projectId/chat-sessions/:sessionId
- *   DELETE /api/projects/:projectId/chat-sessions/:sessionId
- *   PUT    /api/projects/:projectId/chat-sessions/:sessionId/messages
- *
- *   POST   /api/sessions/:sessionId/chat   (SSE stream)
- *   POST   /api/chat                       (SSE stream, direct)
+ *   GET    /api/projects/:projectId/conversations
+ *   POST   /api/projects/:projectId/conversations
+ *   GET    /api/projects/:projectId/conversations/:conversationId
+ *   PATCH  /api/projects/:projectId/conversations/:conversationId
+ *   DELETE /api/projects/:projectId/conversations/:conversationId
+ *   GET    /api/projects/:projectId/conversations/:conversationId/messages
+ *   POST   /api/projects/:projectId/conversations/:conversationId/messages
+ *   GET    /api/projects/:projectId/conversations/:conversationId/runs
+ *   POST   /api/projects/:projectId/conversations/:conversationId/runs
+ *   GET    /api/projects/:projectId/conversations/:conversationId/runs/:runId
  *
  *   GET    /api/status
  */
@@ -47,12 +42,11 @@ import { fileURLToPath } from 'node:url';
 import { initDb } from './db.js';
 import { projectsRouter } from './routes/projects.js';
 import { filesRouter } from './routes/files.js';
-import { agentSessionsRouter } from './routes/agentSessions.js';
-import { chatSessionsRouter } from './routes/chatSessions.js';
-import { chatRouter } from './routes/chat.js';
-import { directChatRouter } from './routes/directChat.js';
+import { conversationsRouter } from './routes/conversations.js';
+import { conversationRunsRouter } from './routes/conversationRuns.js';
 import { adminAuthRouter } from './routes/adminAuth.js';
 import { aiKeysRouter } from './routes/aiKeys.js';
+import { shutdownManagedProjectServers } from './projectServerManager.js';
 
 dotenv.config();
 
@@ -83,28 +77,29 @@ app.use(express.json({ limit: '2mb' }));
 
 app.use('/api/projects', projectsRouter);
 app.use('/api/projects/:projectId/files', filesRouter);
-app.use('/api/projects/:projectId/sessions', agentSessionsRouter);
-app.use('/api/projects/:projectId/chat-sessions', chatSessionsRouter);
+app.use('/api/projects/:projectId/conversations', conversationsRouter);
+app.use('/api/projects/:projectId/conversations/:conversationId/runs', conversationRunsRouter);
 app.use('/api/admin', adminAuthRouter);
 app.use('/api/ai/keys', aiKeysRouter);
-app.use('/api/sessions/:sessionId/chat', chatRouter);
-app.use('/api/chat', directChatRouter);
 
 /* ------------------------------------------------------------------ */
 /*  GET /api/status                                                   */
 /* ------------------------------------------------------------------ */
 
 app.get('/api/status', (_req, res) => {
-  const freeCodeUrl = process.env.FREE_CODE_SERVER_URL || 'http://localhost:3002';
+  const agentServerUrl = process.env.AGENT_SERVER_URL || 'http://localhost:3002';
+  const managedProjectServers = process.env.SYSML_MANAGE_FORK_SERVERS !== '0';
   res.json({
     ok: true,
     server: 'sysml-server',
     version: '0.2.0',
     configured: true,
-    providerLabel: 'free-code',
-    free_code_server_url: freeCodeUrl,
+    providerLabel: 'claude',
+    agent_server_url: agentServerUrl,
     ai_api_key_required: true,
     admin_auth_required: true,
+    managed_project_servers: managedProjectServers,
+    conversation_delete_supported: true,
   });
 });
 
@@ -113,8 +108,38 @@ app.get('/api/status', (_req, res) => {
 /* ------------------------------------------------------------------ */
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[sysml-server] Running on http://localhost:${PORT}`);
-  console.log(`[sysml-server] free-code server: ${process.env.FREE_CODE_SERVER_URL || 'http://localhost:3002'}`);
+  console.log(`[sysml-server] agent server: ${process.env.AGENT_SERVER_URL || 'http://localhost:3002'}`);
   console.log(`[sysml-server] Database: ${dbPath}`);
+});
+
+let shuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`[sysml-server] Received ${signal}, shutting down...`);
+
+  try {
+    await shutdownManagedProjectServers();
+  } catch (error) {
+    console.warn('[sysml-server] Failed during managed server shutdown:', error);
+  }
+
+  await new Promise<void>(resolve => {
+    server.close(() => resolve());
+  });
+
+  process.exit(0);
+}
+
+process.on('SIGINT', () => {
+  void gracefulShutdown('SIGINT');
+});
+
+process.on('SIGTERM', () => {
+  void gracefulShutdown('SIGTERM');
 });

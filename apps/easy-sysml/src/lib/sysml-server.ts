@@ -58,19 +58,42 @@ export interface ServerFileRecord {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Chat session types                                                 */
+/*  Conversation types                                                 */
 /* ------------------------------------------------------------------ */
 
-/** A chat session stored on the backend (messages stored as JSON). */
-export interface ServerChatSession {
+export interface ServerConversation {
   id: string;
   project_id: string;
   title: string;
-  conversation_id: string | null;
-  /** Full message history — only included when fetching a single session */
-  messages?: unknown[];
+  status?: string;
+  upstream_session_id?: string | null;
+  last_message_at?: number | null;
+  archived_at?: number | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface ServerConversationMessage {
+  id: string;
+  conversation_id: string;
+  run_id: string | null;
+  role: 'user' | 'assistant' | 'error' | 'system';
+  content: string;
+  provider?: string;
+  thinkingSteps: Array<{ content: string; timestamp: number }>;
+  toolCalls: Array<{
+    id?: string;
+    name: string;
+    input?: Record<string, unknown>;
+    status: 'running' | 'completed' | 'error';
+    result?: string;
+    timestamp: number;
+  }>;
+  codesSynced: number;
+  durationMs?: number;
+  thinkingDurationMs?: number;
+  sequence: number;
+  created_at: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -174,72 +197,66 @@ export async function deleteProjectFile(projectId: string, nodeId: string): Prom
 }
 
 /* ------------------------------------------------------------------ */
-/*  Chat sessions API                                                  */
+/*  Conversations API                                                  */
 /* ------------------------------------------------------------------ */
 
-export async function listChatSessions(projectId: string): Promise<ServerChatSession[]> {
-  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions`));
-  return readJson<ServerChatSession[]>(response);
+export async function listConversations(projectId: string): Promise<ServerConversation[]> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/conversations`));
+  return readJson<ServerConversation[]>(response);
 }
 
-export async function createChatSession(
+export async function createConversation(
   projectId: string,
-  input: { title?: string; conversation_id?: string | null; messages?: unknown[] },
-): Promise<ServerChatSession> {
-  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions`), {
+  input: { title?: string },
+): Promise<ServerConversation> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/conversations`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  return readJson<ServerChatSession>(response);
+  return readJson<ServerConversation>(response);
 }
 
-export async function getChatSession(
+export async function getConversation(
   projectId: string,
-  sessionId: string,
-): Promise<ServerChatSession> {
-  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}`));
-  return readJson<ServerChatSession>(response);
+  conversationId: string,
+): Promise<ServerConversation> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/conversations/${conversationId}`));
+  return readJson<ServerConversation>(response);
 }
 
-export async function updateChatSession(
+export async function updateConversation(
   projectId: string,
-  sessionId: string,
-  input: { title?: string; conversation_id?: string | null; messages?: unknown[] },
-): Promise<ServerChatSession> {
-  const response = await fetch(apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}`), {
-    method: 'PUT',
+  conversationId: string,
+  input: { title?: string; status?: string; archived?: boolean },
+): Promise<ServerConversation> {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/conversations/${conversationId}`), {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  return readJson<ServerChatSession>(response);
+  return readJson<ServerConversation>(response);
 }
 
-export async function deleteChatSession(
+export async function deleteConversation(
   projectId: string,
-  sessionId: string,
+  conversationId: string,
 ): Promise<void> {
   const response = await fetch(
-    apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}`),
+    apiUrl(`/api/projects/${projectId}/conversations/${conversationId}`),
     { method: 'DELETE' },
   );
   await readJson<{ ok: boolean }>(response);
 }
 
-export async function saveChatSessionMessages(
+export async function listConversationMessages(
   projectId: string,
-  sessionId: string,
-  messages: unknown[],
-): Promise<void> {
+  conversationId: string,
+): Promise<ServerConversationMessage[]> {
   const response = await fetch(
-    apiUrl(`/api/projects/${projectId}/chat-sessions/${sessionId}/messages`),
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages }),
-    },
+    apiUrl(`/api/projects/${projectId}/conversations/${conversationId}/messages`),
   );
-  await readJson<{ ok: boolean; count: number }>(response);
+  return readJson<ServerConversationMessage[]>(response);
 }
 
 /* ------------------------------------------------------------------ */

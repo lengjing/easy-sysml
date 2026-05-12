@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
@@ -126,7 +126,7 @@ describe('projects and files routes', () => {
     expect(file.type).toBe('file');
     expect(readFileSync(join(projectRecord.work_dir, 'models', 'main.sysml'), 'utf8')).toBe('package Vehicle {}');
 
-    // Rename + update content via PUT — the ID changes because it's path-derived
+    // Rename + update content via PUT 鈥?the ID changes because it's path-derived
     const updateFileResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files/${file.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -150,7 +150,7 @@ describe('projects and files routes', () => {
     expect(updatedFile.id).not.toBe(file.id);
     expect(readFileSync(join(projectRecord.work_dir, 'architecture', 'vehicle.sysml'), 'utf8')).toContain('VehicleArchitecture');
 
-    // Listing returns nodes from the filesystem — use the updated ID
+    // Listing returns nodes from the filesystem 鈥?use the updated ID
     const listFilesResponse = await fetch(`${baseUrl}/api/projects/${project.id}/files`);
     expect(listFilesResponse.status).toBe(200);
     const nodes = await listFilesResponse.json() as Array<{ id: string; path: string; type: string }>;
