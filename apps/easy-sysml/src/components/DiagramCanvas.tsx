@@ -54,6 +54,8 @@ export interface DiagramCanvasHandle {
 interface DiagramCanvasProps {
   /** Called when nodes are added or removed (not on position change). */
   onStructureChange: (elements: SimpleElement[]) => void;
+  /** Called when a node is clicked or deselected. */
+  onNodeSelect?: (data: Record<string, unknown> | null) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -61,7 +63,7 @@ interface DiagramCanvasProps {
 /* ------------------------------------------------------------------ */
 
 const DiagramCanvasInner = forwardRef<DiagramCanvasHandle, DiagramCanvasProps>(
-  ({ onStructureChange }, ref) => {
+  ({ onStructureChange, onNodeSelect }, ref) => {
     const [nodes, setNodes, onNodesChange] = useNodesState(
       initialProject.diagrams[0].nodes as Node[]
     );
@@ -159,7 +161,17 @@ const DiagramCanvasInner = forwardRef<DiagramCanvasHandle, DiagramCanvasProps>(
       setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
     }, []);
 
-    const onPaneClick = useCallback(() => setContextMenu(null), []);
+    const onNodeClick = useCallback(
+      (_event: React.MouseEvent, node: Node) => {
+        onNodeSelect?.(node.data as Record<string, unknown>);
+      },
+      [onNodeSelect]
+    );
+
+    const onPaneClick = useCallback(() => {
+      setContextMenu(null);
+      onNodeSelect?.(null);
+    }, [onNodeSelect]);
 
     const handleDeleteNode = useCallback(
       (id: string) => {
@@ -217,6 +229,7 @@ const DiagramCanvasInner = forwardRef<DiagramCanvasHandle, DiagramCanvasProps>(
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeContextMenu={onNodeContextMenu}
+          onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           nodeTypes={nodeTypes}
           connectionMode={ConnectionMode.Loose}

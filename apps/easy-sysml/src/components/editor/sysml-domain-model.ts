@@ -303,6 +303,107 @@ export function flattenElements(elements: DomainElement[]): DomainElement[] {
   return result;
 }
 
+/* ------------------------------------------------------------------ */
+/*  SysML kind → keyword mapping                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Map a normalised SysML element kind (from classifySymbol) to the
+ * corresponding SysML v2 keyword used in source code and stereotype labels.
+ *
+ * Returns `undefined` when no match is found so callers can fall back.
+ */
+const KIND_TO_KEYWORD: Record<string, string> = {
+  // Packages
+  Package:                     'package',
+  LibraryPackage:              'library package',
+  Namespace:                   'namespace',
+
+  // Definitions
+  PartDefinition:              'part def',
+  AttributeDefinition:         'attribute def',
+  PortDefinition:              'port def',
+  InterfaceDefinition:         'interface def',
+  ConnectionDefinition:        'connection def',
+  AllocationDefinition:        'allocation def',
+  FlowConnectionDefinition:    'flow connection def',
+  ItemDefinition:              'item def',
+  OccurrenceDefinition:        'occurrence def',
+  EnumerationDefinition:       'enum def',
+  MetadataDefinition:          'metadata def',
+  ViewDefinition:              'view def',
+  ViewpointDefinition:         'viewpoint def',
+  RenderingDefinition:         'rendering def',
+  ActionDefinition:            'action def',
+  StateDefinition:             'state def',
+  CalculationDefinition:       'calc def',
+  ConstraintDefinition:        'constraint def',
+  RequirementDefinition:       'requirement def',
+  ConcernDefinition:           'concern def',
+  CaseDefinition:              'case def',
+  AnalysisCaseDefinition:      'analysis case def',
+  VerificationCaseDefinition:  'verification case def',
+  UseCaseDefinition:           'use case def',
+
+  // Usages
+  PartUsage:                   'part',
+  AttributeUsage:              'attribute',
+  PortUsage:                   'port',
+  InterfaceUsage:              'interface',
+  ConnectionUsage:             'connection',
+  AllocationUsage:             'allocation',
+  ItemUsage:                   'item',
+  OccurrenceUsage:             'occurrence',
+  EnumerationUsage:            'enum',
+  ReferenceUsage:              'ref',
+  MetadataUsage:               'metadata',
+  FlowConnectionUsage:         'flow',
+  SuccessionFlowUsage:         'flow',
+  ViewUsage:                   'view',
+  ViewpointUsage:              'viewpoint',
+  RenderingUsage:              'rendering',
+
+  // Behavioral usages
+  ActionUsage:                 'action',
+  StateUsage:                  'state',
+  CalculationUsage:            'calc',
+  ConstraintUsage:             'constraint',
+  RequirementUsage:            'requirement',
+  ConcernUsage:                'concern',
+  CaseUsage:                   'case',
+  AnalysisCaseUsage:           'analysis case',
+  VerificationCaseUsage:       'verification case',
+  UseCaseUsage:                'use case',
+  ExhibitStateUsage:           'exhibit',
+  PerformActionUsage:          'perform',
+  AcceptActionUsage:           'accept',
+  SendActionUsage:             'send',
+  AssignmentActionUsage:       'assign',
+  IfActionUsage:               'if',
+  WhileLoopActionUsage:        'while',
+  ForLoopActionUsage:          'for',
+  TransitionUsage:             'transition',
+  SatisfyRequirementUsage:     'satisfy',
+  AssertConstraintUsage:       'assert',
+  TerminateActionUsage:        'terminate',
+  IncludeUseCaseUsage:         'include',
+  EventOccurrenceUsage:        'event',
+
+  // Relationships
+  BindingConnector:            'bind',
+  BindingConnectorAsUsage:     'bind',
+  Succession:                  'succession',
+  SuccessionAsUsage:           'succession',
+};
+
+/**
+ * Return the SysML v2 keyword for a given element kind, or `undefined`
+ * if the kind is not a known SysML v2 element.
+ */
+export function kindToKeyword(kind: string): string | undefined {
+  return KIND_TO_KEYWORD[kind];
+}
+
 /**
  * Find a domain element by id in the tree.
  */

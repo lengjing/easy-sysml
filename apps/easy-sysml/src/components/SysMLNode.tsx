@@ -29,6 +29,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { kindToKeyword } from './editor/sysml-domain-model';
 
 /* ------------------------------------------------------------------ */
 /*  Icon mapping                                                      */
@@ -170,13 +171,15 @@ const RequirementCompartment = ({ text, reqId }: { text?: string; reqId?: string
 
 export const SysMLNode = memo(({ data, selected }: NodeProps) => {
   const {
-    label, type, detail, properties, status, childCount,
+    label, type, kind, detail, properties, status, childCount,
     description, ports, constraints, requirementText, requirementId,
   } = data;
 
   const palette = getStylePalette(type);
   const Icon = ICON_MAP[type] ?? FileCode;
-  const stereotype = detail || type;
+  // Use the proper SysML v2 keyword (e.g. «part def») when available,
+  // otherwise fall back to the raw detail string or display type.
+  const stereotype = kindToKeyword(kind) ?? detail ?? type;
 
   return (
     <div className={cn(
