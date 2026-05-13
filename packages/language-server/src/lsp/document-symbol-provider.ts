@@ -91,26 +91,39 @@ const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
 /** Node types that carry their name in a cross-reference rather than a name property. */
 const IMPORT_TYPES = new Set(['NamespaceImport', 'MembershipImport']);
 
+/** Minimal typed shape of Langium cross-reference objects used in import nodes. */
+interface LangiumRef {
+  $refText?: string;
+  $refNode?: CstNode;
+}
+
+/** Typed shape of NamespaceImport AST nodes. */
+interface NamespaceImportNode extends AstNode {
+  importedNamespace?: LangiumRef;
+}
+
+/** Typed shape of MembershipImport AST nodes. */
+interface MembershipImportNode extends AstNode {
+  importedMembership?: LangiumRef;
+}
+
 /** Extract the referenced name text from an import AST node. */
 function getImportRefText(astNode: AstNode): string | undefined {
-  const node = astNode as unknown as Record<string, unknown>;
   if (astNode.$type === 'NamespaceImport') {
-    const ref = node['importedNamespace'] as { $refText?: string } | undefined;
-    return ref?.$refText;
+    return (astNode as NamespaceImportNode).importedNamespace?.$refText;
   }
   if (astNode.$type === 'MembershipImport') {
-    const ref = node['importedMembership'] as { $refText?: string } | undefined;
-    return ref?.$refText;
+    return (astNode as MembershipImportNode).importedMembership?.$refText;
   }
   return undefined;
 }
 
 /** Get the CST node of the reference itself (for selectionRange). */
 function getImportRefCstNode(astNode: AstNode): CstNode | undefined {
-  const node = astNode as unknown as Record<string, unknown>;
-  const refProp = astNode.$type === 'NamespaceImport' ? 'importedNamespace' : 'importedMembership';
-  const ref = node[refProp] as { $refNode?: CstNode } | undefined;
-  return ref?.$refNode;
+  if (astNode.$type === 'NamespaceImport') {
+    return (astNode as NamespaceImportNode).importedNamespace?.$refNode;
+  }
+  return (astNode as MembershipImportNode).importedMembership?.$refNode;
 }
 
 export class SysMLDocumentSymbolProvider extends DefaultDocumentSymbolProvider {
