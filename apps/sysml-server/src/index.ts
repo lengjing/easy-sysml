@@ -1,5 +1,5 @@
 ﻿/**
- * SysML Server 鈥?Main Entry Point
+ * SysML Server - Main Entry Point
  *
  * Express server providing:
  *   - Project management (CRUD)

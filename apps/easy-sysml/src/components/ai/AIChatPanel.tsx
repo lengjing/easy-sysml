@@ -3,12 +3,13 @@
  *
  * Communicates with sysml-server via SSE streaming, which proxies to Claude server.
  * - Streams markdown content token-by-token (rendered via react-markdown)
- * - Auto-applies SysML code to editor when the agent writes a .sysml file
+ * - Re-syncs project files after each completed run so editor/file tree follow agent writes
  * - Shows action history inline: "Thought for X.X seconds", "Read file", "Edited file", etc.
  * - Supports slash commands: /code, /help, /clear
  * - Maintains multiple named sessions backed by the sysml-server backend
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -34,7 +35,7 @@ import { extractSseEvents } from './sse';
 /* ------------------------------------------------------------------ */
 
 interface AIChatPanelProps {
-  onApplyCode: (code: string) => void;
+  onRunComplete?: () => Promise<void> | void;
   currentCode?: string;
   projectId?: string;
 }
@@ -150,6 +151,20 @@ function getBasename(filePath: string): string {
   return filePath.split('/').pop()?.split('\\').pop() ?? filePath;
 }
 
+function isCompletedSysmlWriteToolCall(toolCall: ToolCall | undefined): toolCall is ToolCall {
+  if (!toolCall || toolCall.status !== 'completed') {
+    return false;
+  }
+
+  const toolName = toolCall.name.toLowerCase();
+  if (!['write', 'edit', 'multiedit'].includes(toolName)) {
+    return false;
+  }
+
+  const filePath = String(toolCall.input?.file_path ?? toolCall.input?.path ?? toolCall.input?.new_path ?? '');
+  return filePath.toLowerCase().endsWith('.sysml');
+}
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
@@ -204,6 +219,86 @@ function persistApiKey(value: string): void {
   } catch {
     // ignore storage errors
   }
+}
+
+function mergeStreamingToolCalls(
+  existingToolCalls: ToolCall[],
+  incoming: Partial<ToolCall> & Pick<ToolCall, 'status'>,
+): ToolCall[] {
+  const nextToolCall: ToolCall = {
+    id: incoming.id,
+    name: incoming.name ?? 'unknown',
+    input: incoming.input,
+    status: incoming.status,
+    result: incoming.result,
+    timestamp: incoming.timestamp ?? Date.now(),
+  };
+
+  if (nextToolCall.id) {
+    const existingIndex = existingToolCalls.findIndex(toolCall => toolCall.id === nextToolCall.id);
+    if (existingIndex >= 0) {
+      const existing = existingToolCalls[existingIndex];
+      const mergedToolCall: ToolCall = {
+        ...existing,
+        ...nextToolCall,
+        name: incoming.name ?? existing.name,
+        input: incoming.input ?? existing.input,
+        result: incoming.result ?? existing.result,
+        timestamp: incoming.timestamp ?? existing.timestamp,
+      };
+      const updatedToolCalls = [...existingToolCalls];
+      updatedToolCalls[existingIndex] = mergedToolCall;
+      return updatedToolCalls;
+    }
+  }
+
+  return [...existingToolCalls, nextToolCall];
+}
+
+function buildAssistantMessage(params: {
+  content: string;
+  thinkingSteps: ThinkingStep[];
+  toolCalls: ToolCall[];
+  codeCount: number;
+  durationMs?: number;
+  thinkingStartTs: number | null;
+  thinkingEndTs: number | null;
+  providerLabel?: string;
+}): ChatMessage | null {
+  const {
+    content,
+    thinkingSteps,
+    toolCalls,
+    codeCount,
+    durationMs,
+    thinkingStartTs,
+    thinkingEndTs,
+    providerLabel,
+  } = params;
+
+  if (!content.trim() && codeCount === 0 && toolCalls.length === 0) {
+    return null;
+  }
+
+  const thinkingDurationMs =
+    thinkingStartTs !== null && thinkingEndTs !== null
+      ? thinkingEndTs - thinkingStartTs
+      : thinkingSteps.length > 0 && durationMs
+      ? Math.min(durationMs * THINKING_DURATION_ESTIMATE_RATIO, MAX_THINKING_DURATION_MS)
+      : undefined;
+
+  return {
+    id: makeId(),
+    role: 'assistant',
+    content,
+    provider: providerLabel || 'claude',
+    thinkingSteps: [...thinkingSteps],
+    toolCalls: [...toolCalls],
+    codesSynced: codeCount,
+    durationMs,
+    thinkingDurationMs,
+    timestamp: Date.now(),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -289,7 +384,7 @@ const markdownComponents = {
 /* ------------------------------------------------------------------ */
 
 export const AIChatPanel: React.FC<AIChatPanelProps> = ({
-  onApplyCode,
+  onRunComplete,
   currentCode,
   projectId,
 }) => {
@@ -478,14 +573,41 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     abortRef.current = controller;
 
     const thinkingAcc: ThinkingStep[] = [];
-    const toolCallAcc: ToolCall[] = [];
+    let toolCallAcc: ToolCall[] = [];
     let contentAcc = '';
     let codeCount = 0;
+    const countedWriteToolCallIds = new Set<string>();
     let durationMs: number | undefined;
     // Track messages accumulated for this turn (errors may be added during streaming)
     let turnMessages = [...turnStartMessages];
     // Set to true when the user explicitly aborts so we skip persistence
     let turnAborted = false;
+    let assistantCommitted = false;
+
+    const commitAssistantMessage = () => {
+      if (assistantCommitted) {
+        return;
+      }
+
+      const assistantMsg = buildAssistantMessage({
+        content: contentAcc,
+        thinkingSteps: thinkingAcc,
+        toolCalls: toolCallAcc,
+        codeCount,
+        durationMs,
+        thinkingStartTs: thinkingStartTsRef.current,
+        thinkingEndTs: thinkingEndTsRef.current,
+        providerLabel: backendStatus?.providerLabel,
+      });
+
+      if (!assistantMsg) {
+        return;
+      }
+
+      assistantCommitted = true;
+      turnMessages = [...turnMessages, assistantMsg];
+      chatSessionsRef.current.setMessages(turnMessages);
+    };
 
     try {
       const activeSession = await chatSessionsRef.current.ensureActiveSession(turnStartMessages);
@@ -504,7 +626,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         },
         body: JSON.stringify({
           message: userText,
-          autoApply: true,
         }),
         signal: controller.signal,
       });
@@ -560,41 +681,33 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 setStreamingContent(contentAcc);
                 break;
               }
-              case 'code': {
-                codeCount++;
-                setStreamingCodeCount(codeCount);
-                if (data.autoApply && data.content) {
-                  onApplyCode(data.content);
-                }
-                break;
-              }
               case 'tool_call': {
                 if (thinkingStartTsRef.current !== null && thinkingEndTsRef.current === null) {
                   thinkingEndTsRef.current = Date.now();
                 }
-                const tc: ToolCall = {
+                toolCallAcc = mergeStreamingToolCalls(toolCallAcc, {
                   id: data.id,
-                  name: data.name || 'unknown',
-                  input: data.input,
+                  name: typeof data.name === 'string' ? data.name : undefined,
+                  input: typeof data.input === 'object' ? data.input : undefined,
                   status: data.status,
-                  result: data.result,
+                  result: typeof data.result === 'string' ? data.result : undefined,
                   timestamp: Date.now(),
-                };
-                let existingIdx = -1;
-                if (data.id && data.status !== 'running') {
-                  for (let i = toolCallAcc.length - 1; i >= 0; i--) {
-                    if (toolCallAcc[i].id === data.id && toolCallAcc[i].status === 'running') {
-                      existingIdx = i;
-                      break;
-                    }
-                  }
+                });
+                const mergedToolCall = data.id
+                  ? toolCallAcc.find(toolCall => toolCall.id === data.id)
+                  : toolCallAcc[toolCallAcc.length - 1];
+                if (
+                  mergedToolCall?.id &&
+                  isCompletedSysmlWriteToolCall(mergedToolCall) &&
+                  !countedWriteToolCallIds.has(mergedToolCall.id)
+                ) {
+                  countedWriteToolCallIds.add(mergedToolCall.id);
+                  codeCount++;
                 }
-                if (existingIdx >= 0) {
-                  toolCallAcc[existingIdx] = tc;
-                } else {
-                  toolCallAcc.push(tc);
-                }
-                setStreamingToolCalls([...toolCallAcc]);
+                flushSync(() => {
+                  setStreamingToolCalls(toolCallAcc);
+                  setStreamingCodeCount(codeCount);
+                });
                 break;
               }
               case 'result': {
@@ -614,23 +727,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 break;
               }
               case 'done': {
-                if (contentAcc.trim() || codeCount > 0 || toolCallAcc.length > 0) {
-                  const thinkingDurationMs =
-                    thinkingStartTsRef.current !== null && thinkingEndTsRef.current !== null
-                      ? thinkingEndTsRef.current - thinkingStartTsRef.current
-                      : thinkingAcc.length > 0 && durationMs
-                      ? Math.min(durationMs * THINKING_DURATION_ESTIMATE_RATIO, MAX_THINKING_DURATION_MS)
-                      : undefined;
-                  const assistantMsg: ChatMessage = {
-                    id: makeId(), role: 'assistant', content: contentAcc,
-                    provider: backendStatus?.providerLabel || 'claude',
-                    thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
-                    codesSynced: codeCount, durationMs, thinkingDurationMs,
-                    timestamp: Date.now(),
-                  };
-                  turnMessages = [...turnMessages, assistantMsg];
-                  chatSessionsRef.current.setMessages(turnMessages);
-                }
+                commitAssistantMessage();
                 break;
               }
             }
@@ -646,23 +743,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         try {
           const data = JSON.parse(event.data);
           if (event.event === 'done') {
-            if (contentAcc.trim() || codeCount > 0 || toolCallAcc.length > 0) {
-              const thinkingDurationMs =
-                thinkingStartTsRef.current !== null && thinkingEndTsRef.current !== null
-                  ? thinkingEndTsRef.current - thinkingStartTsRef.current
-                  : thinkingAcc.length > 0 && durationMs
-                  ? Math.min(durationMs * THINKING_DURATION_ESTIMATE_RATIO, MAX_THINKING_DURATION_MS)
-                  : undefined;
-              const assistantMsg: ChatMessage = {
-                id: makeId(), role: 'assistant', content: contentAcc,
-                provider: backendStatus?.providerLabel || 'claude',
-                thinkingSteps: [...thinkingAcc], toolCalls: [...toolCallAcc],
-                codesSynced: codeCount, durationMs, thinkingDurationMs,
-                timestamp: Date.now(),
-              };
-              turnMessages = [...turnMessages, assistantMsg];
-              chatSessionsRef.current.setMessages(turnMessages);
-            }
+            commitAssistantMessage();
           } else if (event.event === 'result' && typeof data.duration_ms === 'number') {
             durationMs = data.duration_ms;
           }
@@ -687,6 +768,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       // Skipped when the user aborts (turnAborted) since no meaningful response arrived.
       if (!turnAborted) {
         chatSessionsRef.current.saveSession(turnMessages);
+        try {
+          await onRunComplete?.();
+        } catch (error) {
+          console.error('[easy-sysml] Failed to reload project files after run:', error);
+        }
       }
       setLoading(false);
       setStreamingContent('');
@@ -695,7 +781,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setStreamingCodeCount(0);
       abortRef.current = null;
     }
-  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, currentCode, executeCommand, input, loading, onApplyCode, projectId]);
+  }, [aiAvailable, apiKey, apiKeyRequired, backendStatus, currentCode, executeCommand, input, loading, onRunComplete, projectId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); }
@@ -745,7 +831,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     messages,
     sessions,
     activeSessionId,
-    conversationId,
     ensureLoaded,
     loading: sessionListLoading,
     loaded: sessionListLoaded,
@@ -1012,12 +1097,22 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             <span className="text-[12px] text-amber-600 dark:text-amber-400">正在连接后端…</span>
           </div>
         )}
-        <div className={cn(
-          'relative rounded-2xl border transition-all bg-[var(--bg-main)]',
-          loading || !chatEnabled
-            ? 'border-[var(--border-color)] opacity-60'
-            : 'border-[var(--border-color)] hover:border-[var(--text-muted)]/40 focus-within:border-purple-500/40 focus-within:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]',
-        )}>
+        <div className="relative rounded-[18px]">
+          {loading && chatEnabled && (
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-[18px]">
+              <div className="absolute inset-[-140%] animate-[spin_3.6s_linear_infinite] bg-[conic-gradient(from_90deg,rgba(168,85,247,0)_0deg,rgba(168,85,247,0)_120deg,rgba(56,189,248,0.92)_150deg,rgba(244,114,182,0.96)_185deg,rgba(250,204,21,0.72)_220deg,rgba(168,85,247,0)_255deg,rgba(168,85,247,0)_360deg)]" />
+              <div className="absolute inset-[1px] rounded-[17px] bg-[var(--bg-main)]/96" />
+              <div className="absolute inset-0 rounded-[18px] shadow-[0_0_30px_rgba(56,189,248,0.16)]" />
+            </div>
+          )}
+          <div className={cn(
+            'relative rounded-2xl border transition-all bg-[var(--bg-main)] overflow-hidden',
+            !chatEnabled
+              ? 'border-[var(--border-color)] opacity-60'
+              : loading
+              ? 'border-[var(--border-color)] shadow-[0_0_0_1px_rgba(168,85,247,0.18),0_0_24px_rgba(56,189,248,0.10)]'
+              : 'border-[var(--border-color)] hover:border-[var(--text-muted)]/40 focus-within:border-purple-500/40 focus-within:shadow-[0_0_0_3px_rgba(168,85,247,0.08)]',
+          )}>
           <textarea
             ref={inputRef}
             value={input}
@@ -1074,6 +1169,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 <ArrowUp size={13} />
               </button>
             )}
+          </div>
           </div>
         </div>
       </div>

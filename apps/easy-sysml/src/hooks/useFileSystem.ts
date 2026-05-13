@@ -58,6 +58,7 @@ export interface UseFileSystemReturn {
   /** Open (pin) a file as a persistent tab (double-click). Clears preview. */
   openFile: (fileId: string) => void;
   closeTab: (fileId: string) => void;
+  reloadRemoteFiles: () => Promise<void>;
   setActiveFile: (fileId: string) => void;
   updateFileContent: (fileId: string, content: string) => void;
   createFile: (name: string, parentId: string | null, content?: string) => FileNode;
@@ -115,6 +116,10 @@ function buildNodesFromServerResponse(records: ServerFileRecord[]): FileNode[] {
   });
 }
 
+function buildPathToIdMap(records: ServerFileRecord[]): Map<string, string> {
+  return new Map(records.map(record => [record.path, record.id]));
+}
+
 function collectDescendantFileIds(fs: VirtualFileSystem, rootId: string): string[] {
   const root = fs.getNode(rootId);
   if (!root) return [];
@@ -148,6 +153,13 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
+  const openTabsRef = useRef(openTabs);
+  const activeFileIdRef = useRef(activeFileId);
+  const previewFileIdRef = useRef(previewFileId);
+
+  openTabsRef.current = openTabs;
+  activeFileIdRef.current = activeFileId;
+  previewFileIdRef.current = previewFileId;
 
   const markTabDirty = useCallback((fileId: string, dirty: boolean) => {
     setOpenTabs(prev => prev.map(tab => (tab.fileId === fileId ? { ...tab, dirty } : tab)));
@@ -198,6 +210,50 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     [fs, markTabDirty, projectId],
   );
 
+  const syncRemoteFiles = useCallback(
+    async (preserveSelection: boolean) => {
+      if (!projectId) {
+        return;
+      }
+
+      const openTabPaths = preserveSelection
+        ? openTabsRef.current.map(tab => ({ path: fs.getPath(tab.fileId), dirty: tab.dirty }))
+        : [];
+      const activePath = preserveSelection && activeFileIdRef.current ? fs.getPath(activeFileIdRef.current) : null;
+      const previewPath = preserveSelection && previewFileIdRef.current ? fs.getPath(previewFileIdRef.current) : null;
+
+      const remoteRecords = await listProjectFiles(projectId);
+      const nextNodes = buildNodesFromServerResponse(remoteRecords);
+      const pathToId = buildPathToIdMap(remoteRecords);
+      const nextFiles = nextNodes.filter(node => node.type === 'file');
+
+      fs.replaceAll(nextNodes);
+
+      const nextOpenTabs = openTabPaths
+        .map(tab => {
+          const nextId = pathToId.get(tab.path);
+          return nextId ? { fileId: nextId, dirty: false } : null;
+        })
+        .filter((tab): tab is OpenTab => tab !== null);
+
+      const fallbackTab = nextFiles[0] ? [{ fileId: nextFiles[0].id, dirty: false }] : [];
+      const normalizedOpenTabs = nextOpenTabs.length > 0 ? nextOpenTabs : fallbackTab;
+      const nextActiveFileId =
+        (activePath ? pathToId.get(activePath) : null) ?? normalizedOpenTabs[0]?.fileId ?? null;
+      const nextPreviewFileId = previewPath ? pathToId.get(previewPath) ?? null : null;
+
+      setNodes(nextNodes);
+      setOpenTabs(normalizedOpenTabs);
+      setActiveFileId(nextActiveFileId);
+      setPreviewFileId(nextPreviewFileId);
+    },
+    [fs, projectId],
+  );
+
+  const reloadRemoteFiles = useCallback(async () => {
+    await syncRemoteFiles(true);
+  }, [syncRemoteFiles]);
+
   /* -- Initial load -- */
   useEffect(() => {
     let mounted = true;
@@ -208,20 +264,19 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     const loadFiles = async () => {
       try {
         if (projectId) {
-          const remoteRecords = await listProjectFiles(projectId);
-          fs.replaceAll(buildNodesFromServerResponse(remoteRecords));
+          await syncRemoteFiles(false);
         } else {
           await fs.load();
-        }
 
-        if (!mounted) return;
+          if (!mounted) return;
 
-        setNodes(fs.getAllNodes());
-        const files = fs.getAllFiles();
-        if (files.length > 0) {
-          const first = files[0];
-          setOpenTabs([{ fileId: first.id, dirty: false }]);
-          setActiveFileId(first.id);
+          setNodes(fs.getAllNodes());
+          const files = fs.getAllFiles();
+          if (files.length > 0) {
+            const first = files[0];
+            setOpenTabs([{ fileId: first.id, dirty: false }]);
+            setActiveFileId(first.id);
+          }
         }
       } catch (error) {
         console.error('[easy-sysml] Failed to load files:', error);
@@ -236,7 +291,7 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
 
     void loadFiles();
     return () => { mounted = false; };
-  }, [fs, projectId]);
+  }, [fs, projectId, syncRemoteFiles]);
 
   /* -- Cleanup pending save timers on unmount -- */
   useEffect(() => {
@@ -485,6 +540,7 @@ export function useFileSystem(projectId?: string): UseFileSystemReturn {
     closePreview,
     openFile,
     closeTab,
+    reloadRemoteFiles,
     setActiveFile: setActiveFileId,
     updateFileContent,
     createFile,

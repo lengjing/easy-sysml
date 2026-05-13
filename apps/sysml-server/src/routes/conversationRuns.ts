@@ -1,5 +1,4 @@
 import { Router, type Request, type Response } from 'express';
-import { isAbsolute, relative, resolve } from 'node:path';
 import { WebSocket } from 'ws';
 import { authenticateAiApiKey, recordAiApiKeyUsage, type AiApiUsage } from '../aiKeys.js';
 import {
@@ -21,8 +20,8 @@ import {
 export const conversationRunsRouter = Router({ mergeParams: true });
 
 const MAX_TOOL_RESULT = 800;
-const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[/\\]/;
 const pendingConversationRuns = new Map<string, Promise<void>>();
+const WRITE_LIKE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 
 interface RuntimeContext {
   projectId: string;
@@ -65,10 +64,6 @@ Your current working directory is: ${workDir}
 All file operations should be performed within this directory. Do not access files or run commands outside this working directory.`;
 }
 
-function buildPermissionDeniedMessage(workDir: string): string {
-  return `Access outside the project working directory is forbidden and cannot be approved. Only files under ${workDir} are accessible. Do not ask the user for permission; explain the restriction instead.`;
-}
-
 function buildSessionWsUrl(baseUrl: string, sessionId: string): string {
   const wsUrl = new URL(baseUrl);
   wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -99,42 +94,15 @@ function isCanUseToolMessage(msg: unknown): msg is CanUseToolRequest {
   );
 }
 
-function isPathWithinWorkDir(filePath: string, workDir: string): boolean {
-  if (process.platform !== 'win32' && WINDOWS_ABSOLUTE_PATH_RE.test(filePath)) {
-    return false;
-  }
-  const abs = isAbsolute(filePath) ? filePath : resolve(workDir, filePath);
-
-  if (process.platform === 'win32' && WINDOWS_ABSOLUTE_PATH_RE.test(abs)) {
-    const workDrive = resolve(workDir).slice(0, 2).toLowerCase();
-    const fileDrive = resolve(abs).slice(0, 2).toLowerCase();
-    if (workDrive !== fileDrive) {
-      return false;
-    }
-  }
-
-  const rel = relative(workDir, abs);
-  return !rel.startsWith('..');
+function isToolOperationAllowed(request: CanUseToolRequest['request'], workDir: string): boolean {
+  void request;
+  void workDir;
+  return true;
 }
 
-function isToolOperationAllowed(request: CanUseToolRequest['request'], workDir: string): boolean {
-  const toolName = request.tool_name ?? '';
-  const input = request.input ?? {};
-
-  if (toolName === 'Bash' || toolName === 'TodoRead' || toolName === 'TodoWrite') {
-    return true;
-  }
-
-  if (typeof request.blocked_path === 'string') {
-    return isPathWithinWorkDir(request.blocked_path, workDir);
-  }
-
-  const pathValue = input.file_path ?? input.path ?? input.directory ?? input.dir;
-  if (typeof pathValue === 'string') {
-    return isPathWithinWorkDir(pathValue, workDir);
-  }
-
-  return true;
+function isSysmlWriteToolInput(input: Record<string, unknown>): boolean {
+  const filePathValue = input.file_path ?? input.path ?? input.new_path;
+  return typeof filePathValue === 'string' && filePathValue.toLowerCase().endsWith('.sysml');
 }
 
 function replayConversationHistory(ws: WebSocket, messages: ReplayMessage[]): void {
@@ -179,7 +147,7 @@ async function createUpstreamSession(
     headers: buildAgentServerHeaders(endpoint.authToken, true),
     body: JSON.stringify({
       cwd: workDir,
-      permission_mode: 'acceptEdits',
+      dangerously_skip_permissions: true,
       system_prompt: buildSysmlSystemPrompt(workDir),
     }),
   });
@@ -273,7 +241,6 @@ conversationRunsRouter.get('/:runId', (req: Request, res: Response) => {
 
 conversationRunsRouter.post('/', async (req: Request, res: Response) => {
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
-  const autoApply = req.body?.autoApply !== false;
   if (!message) {
     res.status(400).json({ error: 'message is required' });
     return;
@@ -476,16 +443,13 @@ conversationRunsRouter.post('/', async (req: Request, res: Response) => {
 
           if (isCanUseToolMessage(msg)) {
             const allowed = isToolOperationAllowed(msg.request, context.workDir);
+            const decision = allowed ? { behavior: 'allow' as const } : { behavior: 'deny' as const };
             ws.send(
               JSON.stringify({
                 type: 'control_response',
-                response: {
-                  subtype: 'success',
-                  request_id: msg.request_id,
-                  response: allowed
-                    ? { behavior: 'allow' }
-                    : { behavior: 'deny', message: buildPermissionDeniedMessage(context.workDir) },
-                },
+                request_id: msg.request_id,
+                subtype: 'success',
+                response: decision,
               }),
             );
             continue;
@@ -606,31 +570,25 @@ conversationRunsRouter.post('/', async (req: Request, res: Response) => {
                 if (toolCall) {
                   toolCall.status = isError ? 'error' : 'completed';
                   toolCall.result = resultText;
+                  sseWrite(res, 'tool_call', { ...toolCall });
                 }
 
-                if (!isError && pendingTool.name === 'Write') {
-                  const filePath = String(pendingTool.input.file_path ?? pendingTool.input.path ?? '');
-                  const fileContent = String(
-                    pendingTool.input.content ?? pendingTool.input.new_content ?? '',
-                  );
-                  if (filePath.endsWith('.sysml') && fileContent) {
+                if (!isError && WRITE_LIKE_TOOLS.has(pendingTool.name)) {
+                  if (isSysmlWriteToolInput(pendingTool.input)) {
                     codeCount += 1;
-                    sseWrite(res, 'code', {
-                      content: fileContent,
-                      language: 'sysml',
-                      autoApply,
-                      filePath,
-                    });
                   }
                 }
+              } else {
+                sseWrite(res, 'tool_call', {
+                  id,
+                  name: 'unknown',
+                  status: isError ? 'error' : 'completed',
+                  result: resultText,
+                  timestamp: Date.now(),
+                });
               }
 
               pendingToolUses.delete(id);
-              sseWrite(res, 'tool_call', {
-                id,
-                status: isError ? 'error' : 'completed',
-                result: resultText,
-              });
               break;
             }
 

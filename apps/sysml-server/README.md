@@ -119,7 +119,6 @@ SSE event stream:
 | `delta` | `{content}` | Streaming text chunk |
 | `thinking` | `{content}` | Agent reasoning |
 | `tool_call` | `{id, name, input?, status, result?}` | Tool invocation/result |
-| `code` | `{content, language, autoApply, filePath}` | SysML file written |
 | `result` | `{is_error, duration_ms, total_cost_usd}` | Final summary |
 | `error` | `{content}` | Error message |
 | `done` | `{}` | Stream complete |

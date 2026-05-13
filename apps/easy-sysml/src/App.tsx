@@ -77,6 +77,7 @@ function WorkbenchContent() {
     openFile,
     closeTab,
     setActiveFile,
+    reloadRemoteFiles,
     updateFileContent,
     createFile,
     createDirectory,
@@ -179,11 +180,10 @@ function WorkbenchContent() {
     }
   }, [parsedNodes, parsedEdges, showCode]);
 
-  // Callback for AI "Apply" button — replaces editor code and opens editor
-  const handleApplyAICode = useCallback((code: string) => {
-    setKermlCode(code);
+  const handleAiRunComplete = useCallback(async () => {
+    await reloadRemoteFiles();
     setShowCode(true);
-  }, [setKermlCode]);
+  }, [reloadRemoteFiles]);
 
   const addNewElement = useCallback((type: string = 'Block') => {
     canvasRef.current?.addNode(type);
@@ -318,7 +318,7 @@ function WorkbenchContent() {
               className="border-l border-[var(--border-color)] flex-shrink-0 overflow-hidden"
             >
               <AIChatPanel
-                onApplyCode={handleApplyAICode}
+                onRunComplete={handleAiRunComplete}
                 currentCode={kermlCode}
                 projectId={currentProjectId}
               />
