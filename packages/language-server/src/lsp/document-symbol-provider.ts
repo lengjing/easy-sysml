@@ -6,6 +6,8 @@
  *     can classify elements without a second parse.
  *  2. Map SymbolKind based on the SysML metaclass for better IDE support.
  *  3. Prevent LSP request failures from crashing the server.
+ *  4. Emit symbols for NamespaceImport / MembershipImport statements so
+ *     consumers (e.g. the model canvas) can display imported namespaces.
  */
 
 import { SymbolKind, type DocumentSymbol, type DocumentSymbolParams, type CancellationToken } from 'vscode-languageserver';
@@ -16,6 +18,9 @@ const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
   Package:                     SymbolKind.Package,
   LibraryPackage:              SymbolKind.Package,
   Namespace:                   SymbolKind.Namespace,
+  // Imports
+  NamespaceImport:             SymbolKind.Module,
+  MembershipImport:            SymbolKind.Module,
   PartDefinition:              SymbolKind.Class,
   AttributeDefinition:         SymbolKind.Class,
   PortDefinition:              SymbolKind.Class,
@@ -83,6 +88,31 @@ const SYMBOL_KIND_MAP: Record<string, SymbolKind> = {
   SuccessionAsUsage:           SymbolKind.Variable,
 };
 
+/** Node types that carry their name in a cross-reference rather than a name property. */
+const IMPORT_TYPES = new Set(['NamespaceImport', 'MembershipImport']);
+
+/** Extract the referenced name text from an import AST node. */
+function getImportRefText(astNode: AstNode): string | undefined {
+  const node = astNode as unknown as Record<string, unknown>;
+  if (astNode.$type === 'NamespaceImport') {
+    const ref = node['importedNamespace'] as { $refText?: string } | undefined;
+    return ref?.$refText;
+  }
+  if (astNode.$type === 'MembershipImport') {
+    const ref = node['importedMembership'] as { $refText?: string } | undefined;
+    return ref?.$refText;
+  }
+  return undefined;
+}
+
+/** Get the CST node of the reference itself (for selectionRange). */
+function getImportRefCstNode(astNode: AstNode): CstNode | undefined {
+  const node = astNode as unknown as Record<string, unknown>;
+  const refProp = astNode.$type === 'NamespaceImport' ? 'importedNamespace' : 'importedMembership';
+  const ref = node[refProp] as { $refNode?: CstNode } | undefined;
+  return ref?.$refNode;
+}
+
 export class SysMLDocumentSymbolProvider extends DefaultDocumentSymbolProvider {
   constructor(services: LangiumServices) {
     super(services);
@@ -102,6 +132,31 @@ export class SysMLDocumentSymbolProvider extends DefaultDocumentSymbolProvider {
       console.error('[SysML] DocumentSymbol error:', err);
       return [];
     }
+  }
+
+  protected override getSymbol(document: LangiumDocument, astNode: AstNode): DocumentSymbol[] {
+    // Handle import statements: they carry the name in a cross-reference
+    // property ($refText) rather than a standard name field, so Langium's
+    // default name provider returns undefined for them and they would be
+    // silently skipped. We intercept them here.
+    if (IMPORT_TYPES.has(astNode.$type)) {
+      const name = getImportRefText(astNode);
+      const cstNode = astNode.$cstNode;
+      if (name && cstNode) {
+        const selectionRange = getImportRefCstNode(astNode)?.range ?? cstNode.range;
+        const symbol: DocumentSymbol = {
+          name,
+          kind: SYMBOL_KIND_MAP[astNode.$type] ?? SymbolKind.Module,
+          range: cstNode.range,
+          selectionRange,
+          detail: astNode.$type,
+          children: [],
+        };
+        return [symbol];
+      }
+      return [];
+    }
+    return super.getSymbol(document, astNode);
   }
 
   protected override createSymbol(

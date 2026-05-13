@@ -87,6 +87,8 @@ function displayType(kind: string): string {
     case 'VerificationCaseUsage': return 'VerificationCase';
     case 'SuccessionFlowUsage':   return 'Flow';
     case 'Namespace':             return 'Namespace';
+    case 'NamespaceImport':
+    case 'MembershipImport':      return 'Import';
     default:                      return kind;
   }
 }

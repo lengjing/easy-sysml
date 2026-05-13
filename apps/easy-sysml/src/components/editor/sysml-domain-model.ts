@@ -80,6 +80,10 @@ const AST_TYPE_MAP: Record<string, { kind: string; category: SysMLCategory }> = 
   LibraryPackage:              { kind: 'Package', category: 'package' },
   Namespace:                   { kind: 'Namespace', category: 'package' },
 
+  // Imports
+  NamespaceImport:             { kind: 'NamespaceImport', category: 'package' },
+  MembershipImport:            { kind: 'MembershipImport', category: 'package' },
+
   // Definitions
   PartDefinition:              { kind: 'PartDefinition', category: 'definition' },
   AttributeDefinition:         { kind: 'AttributeDefinition', category: 'definition' },
@@ -318,6 +322,10 @@ const KIND_TO_KEYWORD: Record<string, string> = {
   Package:                     'package',
   LibraryPackage:              'library package',
   Namespace:                   'namespace',
+
+  // Imports
+  NamespaceImport:             'import',
+  MembershipImport:            'import',
 
   // Definitions
   PartDefinition:              'part def',

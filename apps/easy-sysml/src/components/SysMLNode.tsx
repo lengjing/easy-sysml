@@ -48,6 +48,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Assert: ShieldCheck, Binding: Link2, Succession: Repeat,
   Reference: Link2, Definition: Box, Usage: Component,
   Namespace: Package, Element: FileCode, Send: Send,
+  Import: Layers,
 };
 
 /* ------------------------------------------------------------------ */
@@ -95,6 +96,8 @@ export function getStylePalette(type: string): StylePalette {
       return { header: 'bg-gray-600 dark:bg-gray-700', headerText: 'text-white', border: 'border-gray-500 dark:border-gray-600', accent: 'bg-gray-500' };
     case 'Flow':
       return { header: 'bg-cyan-500 dark:bg-cyan-600', headerText: 'text-white', border: 'border-cyan-400 dark:border-cyan-500', accent: 'bg-cyan-500' };
+    case 'Import':
+      return { header: 'bg-zinc-500 dark:bg-zinc-600', headerText: 'text-white', border: 'border-zinc-400 dark:border-zinc-500', accent: 'bg-zinc-500' };
     default:
       return { header: 'bg-slate-500 dark:bg-slate-600', headerText: 'text-white', border: 'border-slate-400 dark:border-slate-600', accent: 'bg-slate-500' };
   }

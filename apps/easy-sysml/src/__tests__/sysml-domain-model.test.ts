@@ -36,6 +36,10 @@ describe('sysml-domain-model', () => {
       ['Package',                     SymbolKind.Package,   'Package',                     'package',      'Pkg'],
       ['LibraryPackage',              SymbolKind.Package,   'Package',                     'package',      'Lib'],
 
+      // Imports
+      ['NamespaceImport',             SymbolKind.Module,    'NamespaceImport',             'package',      'FlightControl'],
+      ['MembershipImport',            SymbolKind.Module,    'MembershipImport',            'package',      'Sensors::Sensor'],
+
       // Definitions
       ['PartDefinition',              SymbolKind.Class,     'PartDefinition',              'definition',   'Motor'],
       ['AttributeDefinition',         SymbolKind.Class,     'AttributeDefinition',         'definition',   'Speed'],
@@ -410,6 +414,9 @@ describe('sysml-domain-model', () => {
       ['Package',                     'package'],
       ['LibraryPackage',              'library package'],
       ['Namespace',                   'namespace'],
+      // Imports
+      ['NamespaceImport',             'import'],
+      ['MembershipImport',            'import'],
       // Definitions
       ['PartDefinition',              'part def'],
       ['AttributeDefinition',         'attribute def'],
