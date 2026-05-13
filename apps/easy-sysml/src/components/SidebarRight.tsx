@@ -30,7 +30,7 @@ export const SidebarRight = ({ visible, selectedNode }: SidebarRightProps) => {
   const nodeId   = typeof selectedNode?.id       === 'string' ? selectedNode.id       : '';
 
   const keyword    = (kind ? (kindToKeyword(kind) ?? detail) : detail) || '—';
-  const properties = selectedNode?.properties as Record<string, string> | undefined ?? {};
+  const properties = selectedNode?.properties as Record<string, string> ?? {};
   const propEntries = Object.entries(properties);
 
   return (
