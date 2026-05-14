@@ -169,6 +169,13 @@ function WorkbenchContent() {
   // Ref to the canvas — used to push addNode / dropNode / setExternalNodes
   const canvasRef = useRef<DiagramCanvasHandle>(null);
 
+  // Selected node data from the canvas (used by properties panel)
+  const [selectedNodeData, setSelectedNodeData] = useState<Record<string, unknown> | null>(null);
+
+  const handleNodeSelect = useCallback((data: Record<string, unknown> | null) => {
+    setSelectedNodeData(data);
+  }, []);
+
   // LSP document symbols → parsed nodes/edges
   const { nodes: parsedNodes, edges: parsedEdges, domainModel, handleDocumentSymbols } =
     useSysMLParser(kermlCode, showCode);
@@ -265,7 +272,7 @@ function WorkbenchContent() {
                   'relative transition-all duration-300',
                   showCode ? 'w-1/2' : 'w-full',
                 )}>
-                  <DiagramCanvas ref={canvasRef} onStructureChange={handleStructureChange} />
+                  <DiagramCanvas ref={canvasRef} onStructureChange={handleStructureChange} onNodeSelect={handleNodeSelect} />
                 </div>
 
                 {/* Keep editor mounted to preserve undo/redo history */}
@@ -304,7 +311,7 @@ function WorkbenchContent() {
         </section>
 
         <AnimatePresence initial={false}>
-          {rightPanelVisible && <SidebarRight visible={rightPanelVisible} />}
+          {rightPanelVisible && <SidebarRight visible={rightPanelVisible} selectedNode={selectedNodeData} />}
         </AnimatePresence>
 
         {/* AI Chat Panel — fixed right sidebar, always mounted once opened */}
